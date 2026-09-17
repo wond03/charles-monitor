@@ -86,10 +86,26 @@ def _calc_rr(pos: dict) -> float:
     return tp_dist / sl_dist
 
 
+def _fmt_duration(seconds: float) -> str:
+    """持仓时长格式化：秒 → 分 → 小时 → 天"""
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}秒"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}分钟"
+    hours = minutes // 60
+    rem_min = minutes % 60
+    if hours < 24:
+        return f"{hours}小时{rem_min}分" if rem_min else f"{hours}小时"
+    days = hours // 24
+    rem_h = hours % 24
+    return f"{days}天{rem_h}小时" if rem_h else f"{days}天"
+
+
 def format_paper_open(pos: dict, balance: float) -> str:
     """模拟开仓消息"""
     dir_cn = "📈 看多 (long)" if pos["direction"] == "long" else "📉 看空 (short)"
-    rr = _calc_rr(pos)
     return "\n".join([
         f"🟢 **模拟开仓 · {pos['name']}**",
         f"> 开仓时间：{pos.get('open_time') or time.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）",
@@ -100,8 +116,6 @@ def format_paper_open(pos: dict, balance: float) -> str:
         f"> 仓位：${pos['size']:,.0f}（保证金 ${pos.get('margin', 0):.2f} @ {pos.get('leverage', 100)}x）",
         f"> 止损：**{pos['sl']:.2f}**",
         f"> 止盈：**{pos['tp']:.2f}**",
-        f"> 盈亏比：**{rr:.2f}**",
-        f"> 模拟余额：**{balance:,.2f} USDT**",
         "> ⚠️ 模拟单仅作练习记录，不涉及真实资金",
     ])
 
@@ -112,10 +126,12 @@ def format_paper_close(kind: str, trade: dict, balance: float) -> str:
                "VOL_TP": "出量止盈", "TREND_EXIT": "趋势转换出场"}.get(kind, kind)
     dir_cn = "📈 多单" if trade["direction"] == "long" else "📉 空单"
     arrow = "+" if trade["pnl"] >= 0 else ""
+    duration = _fmt_duration(trade.get("exit_ts", 0) - trade.get("open_ts", trade.get("exit_ts", 0)))
     return "\n".join([
         f"🔴 **模拟平仓 · {trade['name']}**",
         f"> 平仓时间：{trade.get('exit_time') or time.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）",
         f"> 原因：{kind_cn}（{dir_cn} {trade['strategy']}）",
+        f"> 持仓时长：{duration}",
         f"> 入场 {trade['entry']:.2f} → 出场 **{trade['exit']:.2f}**",
         f"> 盈亏：**{arrow}{trade['pnl']:.2f} USDT**（{arrow}{trade['pnl_pct']:.2f}%）",
         f"> 模拟余额：**{balance:,.2f} USDT**",

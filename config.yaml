@@ -19,8 +19,8 @@ symbols:
 
   gold:
     enabled: true
-    name: "黄金永续(PAXG代理)"
-    inst: "PAXG_USDT"         # PAXG 严格锚定黄金(1:1盎司)，用作黄金1H/15M信号数据源
+    name: "黄金永续(XAU)"
+    inst: "XAU_USDT"          # Gate 直接跟踪伦敦金 XAU 价格的永续合约（替代原 PAXG 代理）
     exchange: "gate-futures,gate,okx,binance"  # Weex 无黄金交易对，不加入备援
     min_move_pct: 0.10
 

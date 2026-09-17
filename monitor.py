@@ -72,9 +72,8 @@ def symbol_signals(sym_cfg: dict, eng_cfg: dict, webhook: str) -> dict:
         return result
 
     sigs = scan_symbol(to_klines(h1), to_klines(m15), to_klines(h4), name, eng_cfg)
-    chg = pct_change(h1, 24)
     price = last_price(h1)
-    extra = f"24h涨跌：{chg:+.2f}%"
+    extra = ""  # 额外说明行（当前不附加，保持消息精简）
     h1_ma = eng_cfg.get("trend_ma", 50)
     vol_mult = float(eng_cfg.get("vol_surge_mult", 2.5))
     if len(h4) > 20:

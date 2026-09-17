@@ -104,7 +104,8 @@ def format_paper_open(pos: dict, balance: float) -> str:
 
 def format_paper_close(kind: str, trade: dict, balance: float) -> str:
     """模拟平仓消息。kind: TP/SL/TIMEOUT/REVERSE"""
-    kind_cn = {"TP": "止盈", "SL": "止损", "TIMEOUT": "超时强平", "REVERSE": "反向平仓", "LIQ": "爆仓"}.get(kind, kind)
+    kind_cn = {"TP": "止盈", "SL": "止损", "TIMEOUT": "超时强平", "REVERSE": "反向平仓", "LIQ": "爆仓",
+               "VOL_TP": "出量止盈", "TREND_EXIT": "趋势转换出场"}.get(kind, kind)
     dir_cn = "📈 多单" if trade["direction"] == "long" else "📉 空单"
     arrow = "+" if trade["pnl"] >= 0 else ""
     return "\n".join([

@@ -72,12 +72,30 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
     """
     开模拟仓。返回 position dict；已有持仓或参数异常返回 None。
     sig 需含 symbol/direction/strategy/level/price/detail。
+    止损止盈按手册条件判定：优先使用 sig.sl_price（结构位）/sig.tp_price（目标位），
+    无结构位或结构止损过宽（超爆仓线内）时回退固定百分比。
     """
     if sym in state["open_positions"]:
         return None
+    if sig.direction not in ("long", "short"):
+        return None
     balance = state["balance"]
     risk = balance * cfg["risk_per_trade_pct"] / 100.0
-    sl, tp = _sl_tp(sig.price, sig.direction, cfg["sl_pct"], cfg["tp_rr"])
+    sl_default, tp_default = _sl_tp(sig.price, sig.direction, cfg["sl_pct"], cfg["tp_rr"])
+    sl, tp = sl_default, tp_default
+    detail = sig.detail
+    use_struct = bool(cfg.get("use_structure_sl_tp", True))
+    if use_struct:
+        s_sl = getattr(sig, "sl_price", None)
+        s_tp = getattr(sig, "tp_price", None)
+        if s_sl and s_tp:
+            liq_dist = 100.0 / max(int(cfg.get("leverage", 100) or 1), 1)
+            dist_pct = abs(sig.price - s_sl) / sig.price * 100
+            if dist_pct <= liq_dist * 0.95:  # 结构止损须在爆仓线内留余量
+                sl, tp = s_sl, s_tp
+                detail = (detail or "") + "；止损=结构位，止盈=目标位（手册条件判定）"
+            else:
+                detail = (detail or "") + f"；结构止损过宽({dist_pct:.2f}%)，回退固定止损{cfg['sl_pct']}%"
     size = _size(sig.price, sl, risk)
     if size <= 0:
         return None
@@ -93,6 +111,8 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
         "entry": round(sig.price, 2),
         "sl": round(sl, 2),
         "tp": round(tp, 2),
+        "initial_sl": round(sl, 2),   # 初始止损位（保本上移的基准）
+        "sl_protected": False,         # 是否已上移保本
         "size": round(size, 2),
         "margin": round(margin, 4),
         "leverage": leverage,
@@ -100,7 +120,7 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
         "open_ts": now,
         "open_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)),
         "entry_type": getattr(sig, "entry_type", "") or "市价委托",
-        "detail": sig.detail,
+        "detail": detail,
     }
     state["open_positions"][sym] = pos
     return pos
@@ -156,21 +176,66 @@ def close_position(state: dict, sym: str, price: float, reason: str, realized_pn
     return trade
 
 
-def manage_positions(state: dict, prices: dict, cfg: dict) -> list:
+def _maybe_breakeven(pos: dict, price: float, cfg: dict) -> None:
+    """保本保护（手册 4.3）：
+    - 浮盈 >= 1.5 倍风险 → 止损移到入场价（保本）
+    - 浮盈 >= 3 倍风险（1:3）→ 止损移到盈利位，锁 1 倍风险利润
     """
-    按现价管理持仓：止盈/止损/超时强平。
-    prices: {symbol: current_price}
-    返回 [(触发类型, 平仓记录), ...]
+    risk = pos.get("risk", 0.0)
+    if risk <= 0:
+        return
+    pnl = mark_price(pos, price)
+    be_rr = float(cfg.get("breakeven_rr", 1.5))
+    lock_rr = float(cfg.get("lock_profit_rr", 3.0))
+    lock_ratio = float(cfg.get("lock_profit_ratio", 1.0))
+    if not pos.get("sl_protected") and pnl >= risk * be_rr:
+        pos["sl"] = pos["entry"]
+        pos["sl_protected"] = True
+    elif pos.get("sl_protected") and pnl >= risk * lock_rr:
+        dist = abs(pos["entry"] - pos.get("initial_sl", pos["entry"]))
+        if pos["direction"] == "long":
+            pos["sl"] = pos["entry"] + dist * lock_ratio
+        else:
+            pos["sl"] = pos["entry"] - dist * lock_ratio
+
+
+def manage_positions(state: dict, ctxs: dict, cfg: dict) -> list:
+    """
+    按现价+上下文管理持仓（对应手册 4.3/4.4）：
+      ctxs: {sym: {"price": 现价, "h4_trend": up/down/flat, "vol_surge": bool}}
+    触发类型：
+      LIQ 爆仓 / SL 止损 / TP 止盈 / TIMEOUT 超时强平 /
+      VOL_TP 出量止盈（4.4 出量吃单）/ TREND_EXIT 趋势转换出场（4.4 大级别反转离场）
+    prices 参数废弃，由 ctxs 承载。
     """
     events = []
     max_hold = cfg["max_hold_hours"] * 3600
     for sym, pos in list(state["open_positions"].items()):
-        price = prices.get(sym)
+        ctx = ctxs.get(sym, {})
+        price = ctx.get("price")
         if price is None:
             continue
         now = time.time()
         lp = liq_price(pos)
         margin = pos.get("margin", 0.0)
+        # 出量止盈：手册"任何情况下一旦出量就要吃单"
+        if ctx.get("vol_surge"):
+            ev = close_position(state, sym, price, "出量止盈")
+            if ev:
+                events.append(("VOL_TP", ev))
+                continue
+        # 趋势转换出场：手册"大级别趋势反转，直接出场"
+        h4t = ctx.get("h4_trend")
+        if h4t == "down" and pos["direction"] == "long":
+            ev = close_position(state, sym, price, "趋势转换出场")
+            if ev:
+                events.append(("TREND_EXIT", ev))
+                continue
+        if h4t == "up" and pos["direction"] == "short":
+            ev = close_position(state, sym, price, "趋势转换出场")
+            if ev:
+                events.append(("TREND_EXIT", ev))
+                continue
         if pos["direction"] == "long":
             if price <= lp:
                 ev = close_position(state, sym, price, "爆仓", realized_pnl=-margin)
@@ -185,6 +250,8 @@ def manage_positions(state: dict, prices: dict, cfg: dict) -> list:
                 ev = close_position(state, sym, price, "止盈")
                 if ev:
                     events.append(("TP", ev))
+            else:
+                _maybe_breakeven(pos, price, cfg)
         else:
             if price >= lp:
                 ev = close_position(state, sym, price, "爆仓", realized_pnl=-margin)
@@ -199,6 +266,8 @@ def manage_positions(state: dict, prices: dict, cfg: dict) -> list:
                 ev = close_position(state, sym, price, "止盈")
                 if ev:
                     events.append(("TP", ev))
+            else:
+                _maybe_breakeven(pos, price, cfg)
         if sym in state["open_positions"] and now - pos["open_ts"] >= max_hold:
             ev = close_position(state, sym, price, "超时强平")
             if ev:

@@ -1,27 +1,27 @@
 {
-  "balance": 100.47,
+  "balance": 100.41,
   "initial_balance": 100.0,
   "peak_equity": 100.47,
   "open_positions": {
     "btc": {
       "symbol": "btc",
       "name": "BTC永续",
-      "direction": "long",
+      "direction": "short",
       "strategy": "归汤",
       "level": "1H",
-      "entry": 76542.4,
-      "sl": 75903.52,
-      "tp": 78459.04,
-      "initial_sl": 75903.52,
+      "entry": 76501.8,
+      "sl": 77200.32,
+      "tp": 74406.23,
+      "initial_sl": 77200.32,
       "sl_protected": false,
-      "size": 120.37,
-      "margin": 1.2037,
+      "size": 109.97,
+      "margin": 1.0997,
       "leverage": 100,
       "risk": 1.0,
-      "open_ts": 1789673735,
-      "open_time": "2026-09-18 03:35:35",
+      "open_ts": 1789673957,
+      "open_time": "2026-09-18 03:39:17",
       "entry_type": "市价委托",
-      "detail": "影线下穿关键位 76530.00 后收回，疑似假突破；0.5回踩位加持(76551.35)；止损=结构位，止盈=目标位（手册条件判定）"
+      "detail": "影线上穿关键位 76530.00 后收回，疑似假突破；0.5回踩位加持(76551.35)；止损=结构位，止盈=目标位（手册条件判定）"
     }
   },
   "closed_trades": [
@@ -234,11 +234,37 @@
       "pnl": 0.22,
       "pnl_pct": 17.515,
       "reason": "反向平仓"
+    },
+    {
+      "symbol": "btc",
+      "name": "BTC永续",
+      "direction": "long",
+      "strategy": "归汤",
+      "level": "1H",
+      "entry": 76542.4,
+      "sl": 75903.52,
+      "tp": 78459.04,
+      "initial_sl": 75903.52,
+      "sl_protected": false,
+      "size": 120.37,
+      "margin": 1.2037,
+      "leverage": 100,
+      "risk": 1.0,
+      "open_ts": 1789673735,
+      "open_time": "2026-09-18 03:35:35",
+      "entry_type": "市价委托",
+      "detail": "影线下穿关键位 76530.00 后收回，疑似假突破；0.5回踩位加持(76551.35)；止损=结构位，止盈=目标位（手册条件判定）",
+      "exit": 76501.8,
+      "exit_ts": 1789673956,
+      "exit_time": "2026-09-18 03:39:16",
+      "pnl": -0.06,
+      "pnl_pct": -5.304,
+      "reason": "反向平仓"
     }
   ],
   "stats": {
     "wins": 7,
-    "losses": 2,
-    "pnl": 0.47
+    "losses": 3,
+    "pnl": 0.41
   }
 }

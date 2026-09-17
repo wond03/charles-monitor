@@ -99,6 +99,7 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
         "risk": round(risk, 2),
         "open_ts": now,
         "open_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)),
+        "entry_type": getattr(sig, "entry_type", "市价委托"),
         "detail": sig.detail,
     }
     state["open_positions"][sym] = pos

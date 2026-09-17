@@ -2,10 +2,13 @@
 """
 查尔斯信号监控系统 · 企业微信机器人推送
 """
+import logging
 import os
 import time
 import requests
 import yaml
+
+log = logging.getLogger(__name__)
 
 # 统一使用北京时间
 os.environ.setdefault("TZ", "Asia/Shanghai")

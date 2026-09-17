@@ -3,8 +3,13 @@
 查尔斯信号监控系统 · 企业微信机器人推送
 """
 import os
+import time
 import requests
 import yaml
+
+# 统一使用北京时间
+os.environ.setdefault("TZ", "Asia/Shanghai")
+time.tzset()
 
 TIMEOUT = 10
 
@@ -46,8 +51,10 @@ def format_signal(sig, extra: str = "") -> str:
     if sig.key_levels:
         kls = " / ".join(f"**{k:.2f}**" for k in sig.key_levels[:4])
         key_lines = f"> 关键位：{kls}\n"
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
     lines = [
         f"**{sig.symbol} {dir_cn}**",
+        f"> 信号时间：{ts}（北京时间）",
         f"> 策略：{sig.strategy}（{sig.level}）",
         f"> 现价：**{sig.price:.2f}**",
     ]

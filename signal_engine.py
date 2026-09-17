@@ -26,6 +26,7 @@ class Kline:
     high: float
     low: float
     close: float
+    volume: float = 0.0
 
 
 @dataclass
@@ -39,13 +40,17 @@ class Signal:
     detail: str = ""
     ts: int = 0
     entry_type: str = ""  # 入场方式：限价委托 / 市价委托 / 条件委托 / 追踪委托
+    sl_price: float = 0.0   # 结构止损位（手册条件判定）
+    tp_price: float = 0.0   # 目标位（盈亏比目标）
+    priority: int = 99      # 条件判定优先级：越小越符合（同品种择优依据）
 
 
 # ---------- 基础工具 ----------
 
 def to_klines(rows: list) -> List[Kline]:
     return [Kline(ts=r["ts"], open=r["open"], high=r["high"],
-                  low=r["low"], close=r["close"]) for r in rows]
+                  low=r["low"], close=r["close"], volume=r.get("volume", 0.0))
+            for r in rows]
 
 
 def sma(values: List[float], period: int) -> float:
@@ -128,6 +133,52 @@ def trend_by_ma(kl: List[Kline], period: int = 50) -> str:
     return "flat"
 
 
+# ---------- 手册条件判定辅助（对应手册 4.2 止损 / 4.4 止盈三原则） ----------
+
+def struct_sl_from_swings(kl: List[Kline], direction: str, radius: int = 3,
+                          buffer_pct: float = 0.1) -> Optional[float]:
+    """结构止损位：long=最近 swing 低点下方，short=最近 swing 高点上方
+    对应手册 4.2：止损设在结构下方/上方（小止损）"""
+    swings = detect_swings(kl, radius)
+    if not swings:
+        return None
+    if direction == "long":
+        lows = [p for _, p, k in swings if k == "low"]
+        if not lows:
+            return None
+        return lows[-1] * (1 - buffer_pct / 100.0)
+    if direction == "short":
+        highs = [p for _, p, k in swings if k == "high"]
+        if not highs:
+            return None
+        return highs[-1] * (1 + buffer_pct / 100.0)
+    return None
+
+
+def tp_from_rr(entry: float, sl: float, direction: str, rr: float) -> Optional[float]:
+    """按盈亏比计算目标价（手册 4.4：到TP止盈）"""
+    if sl is None or sl <= 0:
+        return None
+    dist = abs(entry - sl)
+    if direction == "long":
+        return entry + dist * rr
+    if direction == "short":
+        return entry - dist * rr
+    return None
+
+
+def vol_surge(kl: List[Kline], n: int = 20, mult: float = 2.5) -> bool:
+    """出量检测（手册 4.4：任何情况下一旦出量就要吃单）"""
+    vols = [k.volume for k in kl if k.volume > 0]
+    if len(vols) < 5:
+        return False
+    window = vols[-n:]
+    avg = sum(window) / len(window)
+    if avg <= 0:
+        return False
+    return kl[-1].volume > avg * mult
+
+
 # ---------- 信号原语 ----------
 
 def detect_bos(kl: List[Kline], radius: int = 3) -> Optional[Signal]:
@@ -141,11 +192,21 @@ def detect_bos(kl: List[Kline], radius: int = 3) -> Optional[Signal]:
     idx, price, kind = last_swing
     cur = kl[-1]
     if kind == "high" and cur.close > price:
-        return Signal(symbol="", direction="long", strategy="BOS", level="",
-                      price=cur.close, detail=f"实体收穿前高 {price:.2f}")
+        s = Signal(symbol="", direction="long", strategy="BOS", level="",
+                   price=cur.close, detail=f"实体收穿前高 {price:.2f}", priority=3)
+        sl = struct_sl_from_swings(kl, "long", radius)
+        if sl:
+            s.sl_price = sl
+            s.tp_price = tp_from_rr(cur.close, sl, "long", 3.0) or 0.0
+        return s
     if kind == "low" and cur.close < price:
-        return Signal(symbol="", direction="short", strategy="BOS", level="",
-                      price=cur.close, detail=f"实体收穿前低 {price:.2f}")
+        s = Signal(symbol="", direction="short", strategy="BOS", level="",
+                   price=cur.close, detail=f"实体收穿前低 {price:.2f}", priority=3)
+        sl = struct_sl_from_swings(kl, "short", radius)
+        if sl:
+            s.sl_price = sl
+            s.tp_price = tp_from_rr(cur.close, sl, "short", 3.0) or 0.0
+        return s
     return None
 
 
@@ -158,14 +219,24 @@ def detect_fake_breakout(kl: List[Kline], levels: List[dict]) -> Optional[Signal
         p = lv["price"]
         # 向上假突破：最高价超过水平，但收盘收回水平下方
         if cur.high > p > cur.close and cur.close < p and cur.high >= p * 1.0005:
-            return Signal(symbol="", direction="short", strategy="归汤", level="",
-                          price=cur.close, key_levels=[p],
-                          detail=f"影线上穿关键位 {p:.2f} 后收回，疑似假突破")
+            s = Signal(symbol="", direction="short", strategy="归汤", level="",
+                       price=cur.close, key_levels=[p],
+                       detail=f"影线上穿关键位 {p:.2f} 后收回，疑似假突破", priority=4)
+            sl = struct_sl_from_swings(kl, "short", 3)
+            if sl:
+                s.sl_price = sl
+                s.tp_price = tp_from_rr(cur.close, sl, "short", 3.0) or 0.0
+            return s
         # 向下假突破：最低价低于水平，但收盘收回水平上方
         if cur.low < p < cur.close and cur.low <= p * 0.9995:
-            return Signal(symbol="", direction="long", strategy="归汤", level="",
-                          price=cur.close, key_levels=[p],
-                          detail=f"影线下穿关键位 {p:.2f} 后收回，疑似假突破")
+            s = Signal(symbol="", direction="long", strategy="归汤", level="",
+                       price=cur.close, key_levels=[p],
+                       detail=f"影线下穿关键位 {p:.2f} 后收回，疑似假突破", priority=4)
+            sl = struct_sl_from_swings(kl, "long", 3)
+            if sl:
+                s.sl_price = sl
+                s.tp_price = tp_from_rr(cur.close, sl, "long", 3.0) or 0.0
+            return s
     return None
 
 
@@ -184,13 +255,23 @@ def detect_mss(kl: List[Kline], radius: int = 3) -> Optional[Signal]:
     # 看涨MSS：swing 序列 low -> low，s2低点 > s1低点（higher low），s3反弹高点被实体收穿
     if s1[2] == "low" and s2[2] == "low" and s3[2] == "high":
         if s2[1] > s1[1] and cur.close > s3[1]:
-            return Signal(symbol="", direction="long", strategy="MSS", level="",
-                          price=cur.close, detail=f"更高低点回踩后实体收穿反弹高点 {s3[1]:.2f}")
+            s = Signal(symbol="", direction="long", strategy="MSS", level="",
+                       price=cur.close, detail=f"更高低点回踩后实体收穿反弹高点 {s3[1]:.2f}", priority=3)
+            sl = struct_sl_from_swings(kl, "long", radius)
+            if sl:
+                s.sl_price = sl
+                s.tp_price = tp_from_rr(cur.close, sl, "long", 3.0) or 0.0
+            return s
     # 看跌MSS：swing 序列 high -> high，s2高点 < s1高点（lower high），s3回落低点被实体收穿
     if s1[2] == "high" and s2[2] == "high" and s3[2] == "low":
         if s2[1] < s1[1] and cur.close < s3[1]:
-            return Signal(symbol="", direction="short", strategy="MSS", level="",
-                          price=cur.close, detail=f"更低高点回踩后实体收穿回落低点 {s3[1]:.2f}")
+            s = Signal(symbol="", direction="short", strategy="MSS", level="",
+                       price=cur.close, detail=f"更低高点回踩后实体收穿回落低点 {s3[1]:.2f}", priority=3)
+            sl = struct_sl_from_swings(kl, "short", radius)
+            if sl:
+                s.sl_price = sl
+                s.tp_price = tp_from_rr(cur.close, sl, "short", 3.0) or 0.0
+            return s
     return None
 
 
@@ -215,7 +296,7 @@ def detect_retrace_05(kl: List[Kline], radius: int = 3, tolerance_pct: float = 0
         return Signal(symbol="", direction="", strategy="0.5回踩", level="",
                       price=cur.close, key_levels=[fib_05],
                       detail=f"价格触及斐波那契0.5回踩位 {fib_05:.2f}",
-                      entry_type="限价委托")
+                      entry_type="限价委托", priority=5)
     return None
 
 
@@ -273,25 +354,29 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
     for s in (s_m15_mss, s_m15_bos):
         if not s:
             continue
-        # 方向与 1H 趋势同向 且 15M 有 FVG 支持
+        # 方向与 1H 趋势同向 且 15M 有 FVG 支持（保底：新建信号对象，不污染原 MSS/BOS 供模板复用）
         if h1_trend == "up" and s.direction == "long":
             if m15_fvg == "bull" or m15_trend == "up":
-                s.symbol, s.level = symbol, "15M"
-                s.strategy = "保底"
-                s.entry_type = "条件委托"
-                s.key_levels = [lv["price"] for lv in h1_levels[:4]]
-                s.detail = (f"1H趋势向上 + 15M {s.strategy_orig()}确认 + FVG支持；"
-                            f"参考止损：1H结构下方，目标1:5")
-                out.append(s)
+                s2 = Signal(symbol=symbol, direction="long", strategy="保底", level="15M",
+                            price=s.price, key_levels=[lv["price"] for lv in h1_levels[:4]],
+                            detail=f"1H趋势向上 + 15M {s.strategy}确认 + FVG支持；"
+                                   f"止损=1H结构下方，目标1:5（到TP止盈）",
+                            entry_type="条件委托", priority=2)
+                sl = struct_sl_from_swings(klines_h1, "long", radius_h1)
+                s2.sl_price = sl
+                s2.tp_price = tp_from_rr(s.price, sl, "long", 5.0)
+                out.append(s2)
         elif h1_trend == "down" and s.direction == "short":
             if m15_fvg == "bear" or m15_trend == "down":
-                s.symbol, s.level = symbol, "15M"
-                s.strategy = "保底"
-                s.entry_type = "条件委托"
-                s.key_levels = [lv["price"] for lv in h1_levels[:4]]
-                s.detail = (f"1H趋势向下 + 15M {s.strategy_orig()}确认 + FVG支持；"
-                            f"参考止损：1H结构上方，目标1:5")
-                out.append(s)
+                s2 = Signal(symbol=symbol, direction="short", strategy="保底", level="15M",
+                            price=s.price, key_levels=[lv["price"] for lv in h1_levels[:4]],
+                            detail=f"1H趋势向下 + 15M {s.strategy}确认 + FVG支持；"
+                                   f"止损=1H结构上方，目标1:5（到TP止盈）",
+                            entry_type="条件委托", priority=2)
+                sl = struct_sl_from_swings(klines_h1, "short", radius_h1)
+                s2.sl_price = sl
+                s2.tp_price = tp_from_rr(s.price, sl, "short", 5.0)
+                out.append(s2)
 
     # --- 模板策略：4H 趋势 + 15M 共振 ---
     h4_trend = trend_by_ma(klines_h4, min(h1_ma * 2, 60)) if len(klines_h4) > 20 else "flat"
@@ -299,18 +384,24 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
         if not s:
             continue
         if h4_trend == "up" and s.direction == "long":
+            sl15 = struct_sl_from_swings(klines_m15, "long", radius_m15)
             s2 = Signal(symbol=symbol, direction="long", strategy="模板", level="4H+15M",
                         price=s.price, key_levels=s.key_levels,
                         detail=f"4H趋势向上 + 15M {s.strategy_orig()}共振；"
-                               f"大级别定趋势、小级别找共振",
-                        entry_type="追踪委托")
+                               f"大级别定趋势、小级别找共振；极小止损抓大结构",
+                        entry_type="追踪委托", priority=1)
+            s2.sl_price = sl15
+            s2.tp_price = tp_from_rr(s.price, sl15, "long", 5.0)
             out.append(s2)
         elif h4_trend == "down" and s.direction == "short":
+            sl15 = struct_sl_from_swings(klines_m15, "short", radius_m15)
             s2 = Signal(symbol=symbol, direction="short", strategy="模板", level="4H+15M",
                         price=s.price, key_levels=s.key_levels,
                         detail=f"4H趋势向下 + 15M {s.strategy_orig()}共振；"
-                               f"大级别定趋势、小级别找共振",
-                        entry_type="追踪委托")
+                               f"大级别定趋势、小级别找共振；极小止损抓大结构",
+                        entry_type="追踪委托", priority=1)
+            s2.sl_price = sl15
+            s2.tp_price = tp_from_rr(s.price, sl15, "short", 5.0)
             out.append(s2)
 
     # 附：1H 趋势状态（不推送，供日志）

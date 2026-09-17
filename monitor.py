@@ -26,6 +26,8 @@ import yaml
 os.environ.setdefault("TZ", "Asia/Shanghai")
 time.tzset()
 
+import logger
+
 from datafeed import fetch_klines, last_price, pct_change
 from pusher import (load_webhook, send_wecom, send_test, format_signal,
                     format_paper_open, format_paper_close, format_paper_status)
@@ -43,9 +45,7 @@ def _level_rank_of(sig_or_pos) -> int:
     lv = getattr(sig_or_pos, "level", None) or (sig_or_pos.get("level") if isinstance(sig_or_pos, dict) else None)
     return LEVEL_RANK.get(lv, 0)
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("monitor")
+log = logging.getLogger(__name__)
 
 
 def load_config(path: str = "config.yaml") -> dict:
@@ -165,7 +165,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true", help="只扫描一次")
     parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--log-level", default=None,
+                        help="日志级别 DEBUG/INFO/WARNING/ERROR（默认读 CHARLES_LOG_LEVEL，再默认 INFO）")
+    parser.add_argument("--no-console", action="store_true", help="关闭控制台日志输出（仅写文件）")
     args = parser.parse_args()
+
+    logger.setup("monitor", level=getattr(logging, (args.log_level or "INFO").upper(), logging.INFO),
+                 console=not args.no_console)
 
     cfg = load_config(args.config)
     eng_cfg = cfg["engine"]
@@ -177,6 +183,15 @@ def main():
     if not webhook:
         log.error("请先配置企业微信 webhook：config.yaml 的 wecom_webhook 或环境变量 WECOM_WEBHOOK")
         sys.exit(1)
+
+    syms_on = [f"{k}:{v.get('name')}({v.get('inst')})" for k, v in cfg["symbols"].items() if v.get("enabled")]
+    log.info("启动：标的=%s，数据源=%s，扫描间隔=%ss，冷却=%sh",
+             ", ".join(syms_on),
+             {k: v.get("exchange") for k, v in cfg["symbols"].items() if v.get("enabled")},
+             scan_cfg["scan_interval_seconds"], scan_cfg["cooldown_hours"])
+    log.info("模拟盘：enabled=%s，初始余额=%s，杠杆=%sx，止损=%s%%，止盈=%sR，结构位判定=%s",
+             paper_on, paper_cfg.get("initial_balance"), paper_cfg.get("leverage"),
+             paper_cfg.get("sl_pct"), paper_cfg.get("tp_rr"), paper_cfg.get("use_structure_sl_tp", True))
 
     if scan_cfg.get("push_test_on_start") and not args.once:
         send_test(webhook)
@@ -191,6 +206,7 @@ def main():
     price_rearm_pct = float(scan_cfg.get("cooldown_price_rearm_pct", 0.1))
 
     while True:
+        t0 = time.time()
         try:
             state = paper_trader.load_state(state_file) if paper_on else {}
             prices = {}
@@ -201,6 +217,9 @@ def main():
                 res = symbol_signals(sym_cfg, eng_cfg, webhook)
                 ctxs[key] = {"price": res["price"], "h4_trend": res["h4_trend"],
                              "vol_surge": res["vol_surge"]}
+                log.debug("[%s] 扫描结果：%d 个信号，h4_trend=%s，vol_surge=%s，price=%.2f",
+                          sym_cfg["name"], len(res["signals"]), res["h4_trend"],
+                          res["vol_surge"], res["price"])
                 for sig, extra, price in res["signals"]:
                     prices[key] = price
                     ckey = ":".join([sig.symbol, sig.strategy, sig.direction, sig.level])
@@ -212,6 +231,8 @@ def main():
                         # 冷却期内：价格未明显移动则跳过；价格显著变动视为新机会放行
                         price_drift = abs(price - last_price) / last_price * 100 if last_price else 0
                         if age < cool_sec and price_drift < price_rearm_pct:
+                            log.debug("冷却跳过：%s（age=%.0fs < %ss, drift=%.3f%%）",
+                                      ckey, age, cool_sec, price_drift)
                             continue
                     cooldown[ckey] = {"ts": now, "price": price}
                     try:
@@ -219,7 +240,7 @@ def main():
                         log.info("推送信号: %s %s %s %s @%.2f",
                                  sig.symbol, sig.strategy, sig.direction, sig.level, sig.price)
                     except Exception as e:  # noqa: BLE001
-                        log.error("推送失败: %s", e)
+                        log.error("推送失败: %s", e, exc_info=True)
                     # 模拟单：信号命中即自动开仓（反向持仓先平）
                     if paper_on and paper_cfg:
                         _paper_on_signal(state, key, sig, paper_cfg, webhook)
@@ -231,15 +252,15 @@ def main():
                         send_wecom(webhook, format_paper_close(kind, trade, state["balance"]))
                         log.info("模拟平仓: %s %s %s (%s)", trade["name"], kind, trade["pnl"], trade["reason"])
                     except Exception as e:  # noqa: BLE001
-                        log.error("平仓推送失败: %s", e)
+                        log.error("平仓推送失败: %s", e, exc_info=True)
                 paper_trader.save_state(state, state_file)
                 commit_paper_state(state_file, extra_files=[cooldown_file])
             else:
                 save_cooldown(cooldown, cooldown_file)
                 commit_paper_state(cooldown_file, extra_files=[])
-            log.info("本轮扫描完成")
+            log.info("本轮扫描完成（%.1fs）", time.time() - t0)
         except Exception as e:  # noqa: BLE001
-            log.error("扫描异常: %s", e)
+            log.error("扫描异常: %s", e, exc_info=True)
 
         if args.once:
             break

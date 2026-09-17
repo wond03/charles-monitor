@@ -2,10 +2,69 @@
   "balance": 100.0,
   "initial_balance": 100.0,
   "peak_equity": 100.0,
-  "open_positions": {},
-  "closed_trades": [],
+  "open_positions": {
+    "btc": {
+      "symbol": "btc",
+      "name": "BTC永续",
+      "direction": "",
+      "strategy": "0.5回踩",
+      "level": "1H",
+      "entry": 76205.7,
+      "sl": 76815.35,
+      "tp": 74986.41,
+      "size": 125.0,
+      "margin": 1.25,
+      "leverage": 100,
+      "risk": 1.0,
+      "open_ts": 1789645875,
+      "open_time": "2026-09-17 19:51:15",
+      "detail": "价格触及斐波那契0.5回踩位 76173.30"
+    },
+    "gold": {
+      "symbol": "gold",
+      "name": "黄金永续(XAU)",
+      "direction": "long",
+      "strategy": "BOS",
+      "level": "1H",
+      "entry": 4343.21,
+      "sl": 4308.46,
+      "tp": 4412.7,
+      "size": 125.0,
+      "margin": 1.25,
+      "leverage": 100,
+      "risk": 1.0,
+      "open_ts": 1789645879,
+      "open_time": "2026-09-17 19:51:19",
+      "detail": "实体收穿前高 4341.44"
+    }
+  },
+  "closed_trades": [
+    {
+      "symbol": "btc",
+      "name": "BTC永续",
+      "direction": "short",
+      "strategy": "归汤",
+      "level": "1H",
+      "entry": 76205.7,
+      "sl": 76815.35,
+      "tp": 74986.41,
+      "size": 125.0,
+      "margin": 1.25,
+      "leverage": 100,
+      "risk": 1.0,
+      "open_ts": 1789645873,
+      "open_time": "2026-09-17 19:51:13",
+      "detail": "影线上穿关键位 76270.10 后收回，疑似假突破",
+      "exit": 76205.7,
+      "exit_ts": 1789645874,
+      "exit_time": "2026-09-17 19:51:14",
+      "pnl": -0.0,
+      "pnl_pct": -0.0,
+      "reason": "反向平仓"
+    }
+  ],
   "stats": {
-    "wins": 0,
+    "wins": 1,
     "losses": 0,
     "pnl": 0.0
   }

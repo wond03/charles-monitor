@@ -102,6 +102,12 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
     size = _size(sig.price, sl, risk)
     if size <= 0:
         return None
+    fee_taker = float(cfg.get("fee_taker", 0.0008) or 0.0008)
+    fee_open = size * fee_taker  # 开仓手续费（Weex 市价单 Taker 0.08%）
+    if state["balance"] < fee_open:
+        log.info("模拟余额不足以支付开仓手续费(%.4f)，跳过开仓 %s", fee_open, sig.symbol)
+        return None
+    state["balance"] = round(state["balance"] - fee_open, 2)
     now = int(time.time())
     leverage = int(cfg.get("leverage", 100) or 1)
     margin = size / leverage
@@ -120,6 +126,8 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
         "margin": round(margin, 4),
         "leverage": leverage,
         "risk": round(risk, 2),
+        "fee_taker": fee_taker,
+        "fee_open": round(fee_open, 4),
         "open_ts": now,
         "open_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)),
         "entry_type": getattr(sig, "entry_type", "") or "市价委托",
@@ -154,11 +162,15 @@ def close_position(state: dict, sym: str, price: float, reason: str, realized_pn
         return None
     now = int(time.time())
     sign = 1 if pos["direction"] == "long" else -1
+    fee_taker = pos.get("fee_taker", 0.0008)
+    fee_open = pos.get("fee_open", 0.0)
+    # 平仓手续费按平仓时的名义价值计（开仓名义 × 出场/入场）
+    fee_close = pos["size"] * price / pos["entry"] * fee_taker
     if realized_pnl is not None:
-        pnl = realized_pnl
+        pnl = realized_pnl - fee_close  # 爆仓亏光保证金 + 平仓手续费
         pnl_pct = -100.0  # 爆仓即亏光保证金
     else:
-        pnl = (price - pos["entry"]) / pos["entry"] * sign * pos["size"]
+        pnl = (price - pos["entry"]) / pos["entry"] * sign * pos["size"] - fee_open - fee_close
         # 收益率 = 价格变动% × 杠杆
         pnl_pct = (price - pos["entry"]) / pos["entry"] * 100 * sign * pos.get("leverage", 100)
     state["balance"] = round(state["balance"] + pnl, 2)
@@ -173,6 +185,8 @@ def close_position(state: dict, sym: str, price: float, reason: str, realized_pn
         "exit": round(price, 2),
         "exit_ts": now,
         "exit_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)),
+        "fee_close": round(fee_close, 4),
+        "fee_total": round(fee_open + fee_close, 4),
         "pnl": round(pnl, 2),
         "pnl_pct": round(pnl_pct, 3),
         "reason": reason,

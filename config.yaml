@@ -53,6 +53,8 @@ engine:
 #   sl_pct: 0.8              # 兜底止损距离%(入场价上下)；100x杠杆爆仓线1%，止损必须<1%
 #   tp_rr: 2.0               # 兜底止盈 = 止损距离 × 该倍数（0.8%×2=1.6%）
 #   max_hold_hours: 24       # 最长持仓时间，超时按市价强平
+#   fee_taker: 0.0008        # 开/平仓手续费率（Weex 市价单 Taker 0.08%）
+#   fee_maker: 0.0002        # Maker 费率（0.02%，模拟盘市价触发暂不使用）
 #   state_file: "paper_state.json"  # 模拟账户状态文件（云端自动提交回仓库）
 paper_trading:
   enabled: true
@@ -66,6 +68,8 @@ paper_trading:
   sl_pct: 0.8
   tp_rr: 2.0
   max_hold_hours: 24
+  fee_taker: 0.0008
+  fee_maker: 0.0002
   state_file: "paper_state.json"
 
 # 扫描与推送（日内交易模式）

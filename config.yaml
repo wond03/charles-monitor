@@ -35,6 +35,26 @@ engine:
   fvg_min_pct: 0.05           # FVG缺口最小幅度(%)
   trend_ma: 50                # 趋势判断均线周期(1H)
 
+# 模拟交易（信号命中自动开模拟单，不涉及真实资金）
+# 参数含义：
+#   enabled: true            # 是否开启模拟盘
+#   initial_balance: 100     # 初始模拟资金(USDT)
+#   leverage: 100            # 杠杆倍数（100x：价格反向波动1%即爆仓）
+#   risk_per_trade_pct: 1.0  # 每笔风险占余额%(对应手册：单笔风控1%)
+#   sl_pct: 0.8              # 止损距离%(入场价上下)；100x杠杆爆仓线1%，止损必须<1%
+#   tp_rr: 2.0               # 止盈 = 止损距离 × 该倍数（0.8%×2=1.6%）
+#   max_hold_hours: 24       # 最长持仓时间，超时按市价强平
+#   state_file: "paper_state.json"  # 模拟账户状态文件（云端自动提交回仓库）
+paper_trading:
+  enabled: true
+  initial_balance: 100
+  leverage: 100
+  risk_per_trade_pct: 1.0
+  sl_pct: 0.8
+  tp_rr: 2.0
+  max_hold_hours: 24
+  state_file: "paper_state.json"
+
 # 扫描与推送（日内交易模式）
 scanner:
   scan_interval_seconds: 300  # 本地部署的扫描间隔(秒)；GitHub Actions 云端由 cron '*/15' 控制

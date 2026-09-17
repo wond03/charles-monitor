@@ -123,6 +123,9 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
         "detail": detail,
     }
     state["open_positions"][sym] = pos
+    log.info("模拟开仓: %s %s %s %s @%.2f sl=%.2f tp=%.2f size=%.2f %s",
+             pos["name"], pos["direction"], pos["strategy"], pos["level"], pos["entry"],
+             pos["sl"], pos["tp"], pos["size"], pos["detail"] or "")
     return pos
 
 
@@ -191,12 +194,16 @@ def _maybe_breakeven(pos: dict, price: float, cfg: dict) -> None:
     if not pos.get("sl_protected") and pnl >= risk * be_rr:
         pos["sl"] = pos["entry"]
         pos["sl_protected"] = True
+        log.info("保本上移: %s %s 浮盈 %.2f >= %.2f×risk，止损移至入场价 %.2f",
+                 pos["name"], pos["direction"], pnl, be_rr, pos["entry"])
     elif pos.get("sl_protected") and pnl >= risk * lock_rr:
         dist = abs(pos["entry"] - pos.get("initial_sl", pos["entry"]))
         if pos["direction"] == "long":
             pos["sl"] = pos["entry"] + dist * lock_ratio
         else:
             pos["sl"] = pos["entry"] - dist * lock_ratio
+        log.info("锁利上移: %s %s 浮盈 %.2f >= %.2f×risk，止损移至 %.2f",
+                 pos["name"], pos["direction"], pnl, lock_rr, pos["sl"])
 
 
 def manage_positions(state: dict, ctxs: dict, cfg: dict) -> list:

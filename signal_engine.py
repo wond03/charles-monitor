@@ -32,12 +32,13 @@ class Kline:
 class Signal:
     symbol: str          # BTC / 黄金
     direction: str       # long / short
-    strategy: str        # 保底 / 归汤 / 模板
+    strategy: str        # 保底 / 归汤 / 模板 / BOS / MSS / 0.5回踩
     level: str           # 1H / 15M / 4H
     price: float
     key_levels: list = field(default_factory=list)
     detail: str = ""
     ts: int = 0
+    entry_type: str = ""  # 入场方式：限价委托 / 市价委托 / 条件委托 / 追踪委托
 
 
 # ---------- 基础工具 ----------
@@ -213,7 +214,8 @@ def detect_retrace_05(kl: List[Kline], radius: int = 3, tolerance_pct: float = 0
     if abs(cur.low - fib_05) <= tol or abs(cur.high - fib_05) <= tol or abs(cur.close - fib_05) <= tol:
         return Signal(symbol="", direction="", strategy="0.5回踩", level="",
                       price=cur.close, key_levels=[fib_05],
-                      detail=f"价格触及斐波那契0.5回踩位 {fib_05:.2f}")
+                      detail=f"价格触及斐波那契0.5回踩位 {fib_05:.2f}",
+                      entry_type="限价委托")
     return None
 
 
@@ -295,13 +297,15 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
             s2 = Signal(symbol=symbol, direction="long", strategy="模板", level="4H+15M",
                         price=s.price, key_levels=s.key_levels,
                         detail=f"4H趋势向上 + 15M {s.strategy_orig()}共振；"
-                               f"大级别定趋势、小级别找共振")
+                               f"大级别定趋势、小级别找共振",
+                        entry_type="追踪委托")
             out.append(s2)
         elif h4_trend == "down" and s.direction == "short":
             s2 = Signal(symbol=symbol, direction="short", strategy="模板", level="4H+15M",
                         price=s.price, key_levels=s.key_levels,
                         detail=f"4H趋势向下 + 15M {s.strategy_orig()}共振；"
-                               f"大级别定趋势、小级别找共振")
+                               f"大级别定趋势、小级别找共振",
+                        entry_type="追踪委托")
             out.append(s2)
 
     # 附：1H 趋势状态（不推送，供日志）

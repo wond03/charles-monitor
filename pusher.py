@@ -56,8 +56,10 @@ def format_signal(sig, extra: str = "") -> str:
         f"**{sig.symbol} {dir_cn}**",
         f"> 信号时间：{ts}（北京时间）",
         f"> 策略：{sig.strategy}（{sig.level}）",
-        f"> 现价：**{sig.price:.2f}**",
     ]
+    if getattr(sig, "entry_type", ""):
+        lines.append(f"> 入场方式：{sig.entry_type}")
+    lines.append(f"> 现价：**{sig.price:.2f}**")
     if extra:
         lines.append(f"> {extra}")
     if key_lines:
@@ -89,6 +91,7 @@ def format_paper_open(pos: dict, balance: float) -> str:
         f"🟢 **模拟开仓 · {pos['name']}**",
         f"> 方向：{dir_cn}",
         f"> 策略：{pos['strategy']}（{pos['level']}）",
+        f"> 入场方式：{pos.get('entry_type', '市价委托')}",
         f"> 入场：**{pos['entry']:.2f}**",
         f"> 仓位：${pos['size']:,.0f}（保证金 ${pos.get('margin', 0):.2f} @ {pos.get('leverage', 100)}x）",
         f"> 止损：**{pos['sl']:.2f}**",

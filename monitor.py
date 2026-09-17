@@ -13,6 +13,7 @@
   python monitor.py --once     # 只扫描一次（便于测试）
 """
 import argparse
+import json
 import logging
 import os
 import subprocess
@@ -66,24 +67,45 @@ def symbol_signals(sym_cfg: dict, eng_cfg: dict, webhook: str) -> list:
     return results
 
 
-def commit_paper_state(state_file: str) -> None:
-    """在 Git 环境（GitHub Actions）中把模拟账户状态提交回仓库。
+def commit_paper_state(state_file: str, extra_files: list = None) -> None:
+    """在 Git 环境（GitHub Actions）中把模拟账户状态、冷却状态提交回仓库。
     本地运行没有仓库/权限时静默跳过。"""
+    files = [state_file] + (extra_files or [])
     try:
         subprocess.run(["git", "config", "user.name", "charles-monitor[bot]"],
                        check=True, capture_output=True)
         subprocess.run(["git", "config", "user.email", "actions@users.noreply.github.com"],
                        check=True, capture_output=True)
-        subprocess.run(["git", "add", state_file], check=True, capture_output=True)
+        for f in files:
+            if os.path.exists(f):
+                subprocess.run(["git", "add", f], check=True, capture_output=True)
         r = subprocess.run(["git", "commit", "-m", "paper: update simulated account"],
                            capture_output=True)
         if r.returncode == 0:
             subprocess.run(["git", "push"], check=True, capture_output=True)
-            log.info("模拟账户状态已提交并推送")
+            log.info("状态文件已提交并推送")
         else:
-            log.info("模拟账户状态无变化，跳过提交")
+            log.info("状态文件无变化，跳过提交")
     except Exception as e:  # noqa: BLE001
         log.info("状态文件提交跳过（非 Git 环境）: %s", e)
+
+
+def load_cooldown(path: str) -> dict:
+    """加载持久化冷却记录（GitHub Actions 每次运行都是新进程，须落盘跨运行生效）"""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def save_cooldown(cooldown: dict, path: str) -> None:
+    """持久化冷却记录"""
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cooldown, f, ensure_ascii=False)
+    except Exception as e:  # noqa: BLE001
+        log.warning("冷却状态保存失败: %s", e)
 
 
 def _paper_on_signal(state: dict, sym_key: str, sig, paper_cfg: dict, webhook: str) -> None:
@@ -125,9 +147,13 @@ def main():
         send_test(webhook)
         log.info("启动测试消息已发送")
 
-    # 冷却记录：{(symbol, strategy, direction, level): last_ts}
-    cooldown = {}
+    # 冷却记录：{(symbol, strategy, direction, level): {"ts": last_ts, "price": last_price}}
+    # 持久化到 cooldown_state.json，GitHub Actions 每次运行都是新进程，跨运行生效
+    cooldown_file = "cooldown_state.json"
+    cooldown = load_cooldown(cooldown_file)
     cool_sec = scan_cfg["cooldown_hours"] * 3600
+    # 冷却期内价格变化超过该阈值(%) 视为新机会，允许重新推送
+    price_rearm_pct = float(scan_cfg.get("cooldown_price_rearm_pct", 0.1))
 
     while True:
         try:
@@ -139,11 +165,17 @@ def main():
                 found = symbol_signals(sym_cfg, eng_cfg, webhook)
                 for sig, extra, price in found:
                     prices[key] = price
-                    ckey = (sig.symbol, sig.strategy, sig.direction, sig.level)
+                    ckey = ":".join([sig.symbol, sig.strategy, sig.direction, sig.level])
                     now = time.time()
-                    if ckey in cooldown and now - cooldown[ckey] < cool_sec:
-                        continue
-                    cooldown[ckey] = now
+                    rec = cooldown.get(ckey)
+                    if rec:
+                        age = now - rec.get("ts", 0)
+                        last_price = rec.get("price", 0)
+                        # 冷却期内：价格未明显移动则跳过；价格显著变动视为新机会放行
+                        price_drift = abs(price - last_price) / last_price * 100 if last_price else 0
+                        if age < cool_sec and price_drift < price_rearm_pct:
+                            continue
+                    cooldown[ckey] = {"ts": now, "price": price}
                     try:
                         send_wecom(webhook, format_signal(sig, extra))
                         log.info("推送信号: %s %s %s %s @%.2f",
@@ -163,7 +195,10 @@ def main():
                     except Exception as e:  # noqa: BLE001
                         log.error("平仓推送失败: %s", e)
                 paper_trader.save_state(state, state_file)
-                commit_paper_state(state_file)
+                commit_paper_state(state_file, extra_files=[cooldown_file])
+            else:
+                save_cooldown(cooldown, cooldown_file)
+                commit_paper_state(cooldown_file, extra_files=[])
             log.info("本轮扫描完成")
         except Exception as e:  # noqa: BLE001
             log.error("扫描异常: %s", e)

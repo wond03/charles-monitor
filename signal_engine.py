@@ -278,8 +278,10 @@ def detect_mss(kl: List[Kline], radius: int = 3) -> Optional[Signal]:
     return None
 
 
-def detect_retrace_05(kl: List[Kline], radius: int = 3, tolerance_pct: float = 0.15) -> Optional[Signal]:
-    """0.5 回踩：价格到达最近一波 swing 区间的斐波那契 0.5 位置"""
+def retrace_05_level(kl: List[Kline], radius: int = 3) -> Optional[float]:
+    """最近一波 swing 区间的斐波那契 0.5 价位（对应手册 3.1 附加筛选）。
+    只取最近两个方向相反的 swing（一高一低）构成区间；返回 None 表示无有效区间。
+    注意：本函数只算价位、不作独立信号，由结构信号命中时作为加分项标注。"""
     if len(kl) < radius * 2 + 2:
         return None
     swings = detect_swings(kl, radius)
@@ -292,15 +294,29 @@ def detect_retrace_05(kl: List[Kline], radius: int = 3, tolerance_pct: float = 0
     lo = min(s1[1], s2[1])
     if hi == lo:
         return None
-    fib_05 = lo + (hi - lo) * 0.5
-    cur = kl[-1]
-    tol = fib_05 * tolerance_pct / 100
-    if abs(cur.low - fib_05) <= tol or abs(cur.high - fib_05) <= tol or abs(cur.close - fib_05) <= tol:
-        return Signal(symbol="", direction="", strategy="0.5回踩", level="",
-                      price=cur.close, key_levels=[fib_05],
-                      detail=f"价格触及斐波那契0.5回踩位 {fib_05:.2f}",
-                      entry_type="限价委托", priority=5)
-    return None
+    return lo + (hi - lo) * 0.5
+
+
+def near_level(price: float, level: float, tolerance_pct: float = 0.15) -> bool:
+    """价格是否在目标价位附近（容差百分比）"""
+    if level is None or level <= 0:
+        return False
+    return abs(price - level) / level * 100 <= tolerance_pct
+
+
+def retrace_05_note(kl: List[Kline], direction: str, radius: int = 3) -> str:
+    """0.5 回踩位加持标注：结构信号命中且价格恰处于 0.5 位附近时返回标注文本。
+    顺势校验——long 须价格回踩到 0.5 位（close 不高于 0.5 位 + 容差），
+    short 须价格反弹到 0.5 位（close 不低于 0.5 位 - 容差）。"""
+    fib_05 = retrace_05_level(kl, radius)
+    if fib_05 is None:
+        return ""
+    tol = fib_05 * 0.15 / 100
+    if direction == "long" and kl[-1].close <= fib_05 + tol:
+        return f"；0.5回踩位加持({fib_05:.2f})"
+    if direction == "short" and kl[-1].close >= fib_05 - tol:
+        return f"；0.5回踩位加持({fib_05:.2f})"
+    return ""
 
 
 # ---------- 策略组装 ----------
@@ -318,12 +334,15 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
     # --- 1H 级别信号 ---
     h1_trend = trend_by_ma(klines_h1, h1_ma)
     h1_levels = key_levels(klines_h1, radius_h1, cluster)
+    # 0.5 回踩位附加确认（对应手册 3.1）：不单独推送，结构信号命中且价格恰在 0.5 位附近时标注加分
+    fib_05_note = {d: retrace_05_note(klines_h1, d, radius_h1) for d in ("long", "short")}
 
     # BOS（结构破坏）
     s_bos = detect_bos(klines_h1, radius_h1)
     if s_bos:
         s_bos.symbol, s_bos.level = symbol, "1H"
         s_bos.entry_type = "市价委托"
+        s_bos.detail += fib_05_note.get(s_bos.direction, "")
         out.append(s_bos)
 
     # MSS（回踩型转势）
@@ -331,6 +350,7 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
     if s_mss:
         s_mss.symbol, s_mss.level = symbol, "1H"
         s_mss.entry_type = "市价委托"
+        s_mss.detail += fib_05_note.get(s_mss.direction, "")
         out.append(s_mss)
 
     # 归汤·假突破（1H 关键水平）
@@ -338,13 +358,8 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
     if s_fake:
         s_fake.symbol, s_fake.level = symbol, "1H"
         s_fake.entry_type = "市价委托"
+        s_fake.detail += fib_05_note.get(s_fake.direction, "")
         out.append(s_fake)
-
-    # 0.5 回踩（1H）
-    s_fib = detect_retrace_05(klines_h1, radius_h1)
-    if s_fib:
-        s_fib.symbol, s_fib.level = symbol, "1H"
-        out.append(s_fib)
 
     # --- 保底策略组合：1H 趋势方向 + 15M 转势确认 + FVG 过滤 ---
     m15_levels = key_levels(klines_m15, radius_m15, cluster)
@@ -363,7 +378,8 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
                 s2 = Signal(symbol=symbol, direction="long", strategy="保底", level="15M",
                             price=s.price, key_levels=[lv["price"] for lv in h1_levels[:4]],
                             detail=f"1H趋势向上 + 15M {s.strategy}确认 + FVG支持；"
-                                   f"止损=1H结构下方，目标1:5（到TP止盈）",
+                                   f"止损=1H结构下方，目标1:5（到TP止盈）"
+                                   f"{fib_05_note.get('long', '')}",
                             entry_type="条件委托", priority=2)
                 sl = struct_sl_from_swings(klines_h1, "long", radius_h1)
                 s2.sl_price = sl
@@ -374,7 +390,8 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
                 s2 = Signal(symbol=symbol, direction="short", strategy="保底", level="15M",
                             price=s.price, key_levels=[lv["price"] for lv in h1_levels[:4]],
                             detail=f"1H趋势向下 + 15M {s.strategy}确认 + FVG支持；"
-                                   f"止损=1H结构上方，目标1:5（到TP止盈）",
+                                   f"止损=1H结构上方，目标1:5（到TP止盈）"
+                                   f"{fib_05_note.get('short', '')}",
                             entry_type="条件委托", priority=2)
                 sl = struct_sl_from_swings(klines_h1, "short", radius_h1)
                 s2.sl_price = sl
@@ -390,8 +407,9 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
             sl15 = struct_sl_from_swings(klines_m15, "long", radius_m15)
             s2 = Signal(symbol=symbol, direction="long", strategy="模板", level="4H+15M",
                         price=s.price, key_levels=s.key_levels,
-                        detail=f"4H趋势向上 + 15M {s.strategy_orig()}共振；"
-                               f"大级别定趋势、小级别找共振；极小止损抓大结构",
+                        detail=f"4H趋势向上 + 15M {s.strategy}共振；"
+                               f"大级别定趋势、小级别找共振；极小止损抓大结构"
+                               f"{fib_05_note.get('long', '')}",
                         entry_type="追踪委托", priority=1)
             s2.sl_price = sl15
             s2.tp_price = tp_from_rr(s.price, sl15, "long", 5.0)
@@ -400,8 +418,9 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
             sl15 = struct_sl_from_swings(klines_m15, "short", radius_m15)
             s2 = Signal(symbol=symbol, direction="short", strategy="模板", level="4H+15M",
                         price=s.price, key_levels=s.key_levels,
-                        detail=f"4H趋势向下 + 15M {s.strategy_orig()}共振；"
-                               f"大级别定趋势、小级别找共振；极小止损抓大结构",
+                        detail=f"4H趋势向下 + 15M {s.strategy}共振；"
+                               f"大级别定趋势、小级别找共振；极小止损抓大结构"
+                               f"{fib_05_note.get('short', '')}",
                         entry_type="追踪委托", priority=1)
             s2.sl_price = sl15
             s2.tp_price = tp_from_rr(s.price, sl15, "short", 5.0)

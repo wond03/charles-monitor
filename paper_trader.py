@@ -16,8 +16,11 @@
 由 monitor.py 提交回仓库，保证云端状态不丢）。
 """
 import json
+import logging
 import os
 import time
+
+log = logging.getLogger(__name__)
 
 # 统一使用北京时间（GitHub runner 默认 UTC）
 os.environ.setdefault("TZ", "Asia/Shanghai")

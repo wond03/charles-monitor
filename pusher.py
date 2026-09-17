@@ -89,6 +89,7 @@ def format_paper_open(pos: dict, balance: float) -> str:
     rr = _calc_rr(pos)
     return "\n".join([
         f"🟢 **模拟开仓 · {pos['name']}**",
+        f"> 开仓时间：{pos.get('open_time') or time.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）",
         f"> 方向：{dir_cn}",
         f"> 策略：{pos['strategy']}（{pos['level']}）",
         f"> 入场方式：{pos.get('entry_type') or '市价委托'}",
@@ -110,6 +111,7 @@ def format_paper_close(kind: str, trade: dict, balance: float) -> str:
     arrow = "+" if trade["pnl"] >= 0 else ""
     return "\n".join([
         f"🔴 **模拟平仓 · {trade['name']}**",
+        f"> 平仓时间：{trade.get('exit_time') or time.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）",
         f"> 原因：{kind_cn}（{dir_cn} {trade['strategy']}）",
         f"> 入场 {trade['entry']:.2f} → 出场 **{trade['exit']:.2f}**",
         f"> 盈亏：**{arrow}{trade['pnl']:.2f} USDT**（{arrow}{trade['pnl_pct']:.2f}%）",
@@ -120,13 +122,14 @@ def format_paper_close(kind: str, trade: dict, balance: float) -> str:
 def format_paper_status(state: dict) -> str:
     """模拟账户状态（附在信号推送末尾，当存在持仓时）"""
     stats = state["stats"]
+    now_str = time.strftime("%Y-%m-%d %H:%M:%S")
     lines = [
-        f"📊 **模拟账户**：余额 **{state['balance']:,.2f} USDT**",
+        f"📊 **模拟账户**（{now_str} 北京时间）：余额 **{state['balance']:,.2f} USDT**",
         f"> 累计盈亏：{stats['pnl']:+.2f}（胜 {stats['wins']} / 负 {stats['losses']}）",
     ]
     for sym, pos in state["open_positions"].items():
         dir_cn = "多" if pos["direction"] == "long" else "空"
-        lines.append(f"> 持仓：{pos['name']} {dir_cn} @ {pos['entry']:.2f}（{pos['strategy']}）")
+        lines.append(f"> 持仓：{pos['name']} {dir_cn} @ {pos['entry']:.2f}（{pos['strategy']}，开仓 {pos.get('open_time', '-')}）")
     return "\n".join(lines)
 
 

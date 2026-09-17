@@ -1,25 +1,8 @@
 {
-  "balance": 100.0,
+  "balance": 100.01,
   "initial_balance": 100.0,
-  "peak_equity": 100.0,
+  "peak_equity": 100.01,
   "open_positions": {
-    "btc": {
-      "symbol": "btc",
-      "name": "BTC永续",
-      "direction": "",
-      "strategy": "0.5回踩",
-      "level": "1H",
-      "entry": 76205.7,
-      "sl": 76815.35,
-      "tp": 74986.41,
-      "size": 125.0,
-      "margin": 1.25,
-      "leverage": 100,
-      "risk": 1.0,
-      "open_ts": 1789645875,
-      "open_time": "2026-09-17 19:51:15",
-      "detail": "价格触及斐波那契0.5回踩位 76173.30"
-    },
     "gold": {
       "symbol": "gold",
       "name": "黄金永续(XAU)",
@@ -36,6 +19,23 @@
       "open_ts": 1789645879,
       "open_time": "2026-09-17 19:51:19",
       "detail": "实体收穿前高 4341.44"
+    },
+    "btc": {
+      "symbol": "btc",
+      "name": "BTC永续",
+      "direction": "",
+      "strategy": "0.5回踩",
+      "level": "1H",
+      "entry": 76200.1,
+      "sl": 76809.7,
+      "tp": 74980.9,
+      "size": 125.01,
+      "margin": 1.2501,
+      "leverage": 100,
+      "risk": 1.0,
+      "open_ts": 1789645982,
+      "open_time": "2026-09-17 19:53:02",
+      "detail": "价格触及斐波那契0.5回踩位 76173.30"
     }
   },
   "closed_trades": [
@@ -61,11 +61,57 @@
       "pnl": -0.0,
       "pnl_pct": -0.0,
       "reason": "反向平仓"
+    },
+    {
+      "symbol": "btc",
+      "name": "BTC永续",
+      "direction": "",
+      "strategy": "0.5回踩",
+      "level": "1H",
+      "entry": 76205.7,
+      "sl": 76815.35,
+      "tp": 74986.41,
+      "size": 125.0,
+      "margin": 1.25,
+      "leverage": 100,
+      "risk": 1.0,
+      "open_ts": 1789645875,
+      "open_time": "2026-09-17 19:51:15",
+      "detail": "价格触及斐波那契0.5回踩位 76173.30",
+      "exit": 76200.1,
+      "exit_ts": 1789645978,
+      "exit_time": "2026-09-17 19:52:58",
+      "pnl": 0.01,
+      "pnl_pct": 0.735,
+      "reason": "反向平仓"
+    },
+    {
+      "symbol": "btc",
+      "name": "BTC永续",
+      "direction": "short",
+      "strategy": "归汤",
+      "level": "1H",
+      "entry": 76200.1,
+      "sl": 76809.7,
+      "tp": 74980.9,
+      "size": 125.01,
+      "margin": 1.2501,
+      "leverage": 100,
+      "risk": 1.0,
+      "open_ts": 1789645980,
+      "open_time": "2026-09-17 19:53:00",
+      "detail": "影线上穿关键位 76270.10 后收回，疑似假突破",
+      "exit": 76200.1,
+      "exit_ts": 1789645981,
+      "exit_time": "2026-09-17 19:53:01",
+      "pnl": -0.0,
+      "pnl_pct": -0.0,
+      "reason": "反向平仓"
     }
   ],
   "stats": {
-    "wins": 1,
+    "wins": 3,
     "losses": 0,
-    "pnl": 0.0
+    "pnl": 0.01
   }
 }

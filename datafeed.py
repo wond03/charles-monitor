@@ -10,9 +10,12 @@
 统一输出 Kline: [ {ts, open, high, low, close}, ... ] 时间升序
 """
 import json
+import logging
 import os
 import time
 import requests
+
+log = logging.getLogger(__name__)
 
 TIMEOUT = 15
 
@@ -94,6 +97,7 @@ def _binance_klines(inst: str, interval: str, limit: int) -> list:
             "high": float(row[2]),
             "low": float(row[3]),
             "close": float(row[4]),
+            "volume": float(row[5] or 0),
         })
     return sorted(out, key=lambda x: x["ts"])
 
@@ -162,11 +166,17 @@ def fetch_klines(inst: str, interval: str = "1h", limit: int = 120,
     """按优先级依次尝试多个数据源，返回统一格式K线列表。"""
     last_err = None
     for src in sources:
+        t0 = time.time()
         try:
             iv = _INTERVAL_MAP[src][interval]
-            return _SOURCE_FUNCS[src](inst, iv, limit)
+            data = _SOURCE_FUNCS[src](inst, iv, limit)
+            log.debug("数据源 %s 成功: %s %s x%d (%.1fs)", src, inst, interval, len(data), time.time() - t0)
+            return data
         except Exception as e:  # noqa: BLE001
             last_err = e
+            log.warning("数据源 %s 失败: %s %s %s（%.1fs，将尝试下一备援）",
+                        src, inst, interval, e, time.time() - t0)
+    log.error("所有数据源均失败: %s %s %s: %s", inst, interval, sources, last_err)
     raise RuntimeError(f"所有数据源均失败: {last_err}")
 
 

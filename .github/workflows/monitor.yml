@@ -5,6 +5,12 @@
 # 若使用公共仓库（Public）则不限分钟数（webhook 存在 Secrets 中，不会泄露）
 name: charles-monitor
 
+# 并发控制：同一时刻只保留一个运行中的 workflow（如 push 连续触发多个 run 时，
+# 旧的立即取消、只跑最新的），避免并发 run 同时读到旧冷却记录导致重复推送
+concurrency:
+  group: charles-monitor
+  cancel-in-progress: true
+
 # 允许将模拟账户状态文件(paper_state.json)提交回仓库，保证云端状态不丢失
 permissions:
   contents: write

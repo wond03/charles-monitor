@@ -60,7 +60,3 @@ scanner:
   scan_interval_seconds: 300  # 本地部署的扫描间隔(秒)；GitHub Actions 云端由 cron '*/15' 控制
   cooldown_hours: 4           # 同一信号冷却时间(小时)：日内交易持仓周期短，4小时防刷屏
   push_test_on_start: true    # 启动时发送一条测试消息
-
-# 新浪实时金价(仅用于推送中附带实时伦敦金价，不依赖它做信号)
-sina:
-  gold_snapshot_url: "https://hq.sinajs.cn/list=hf_XAU"

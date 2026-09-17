@@ -15,6 +15,10 @@ on:
     # 例：北京 09:00/09:15/09:30... = UTC 01:00/01:15/01:30...
     # 注意：GitHub 官方承认 schedule 存在延迟/跳过，高峰时可能数十分钟才执行
     - cron: '*/15 * * * *'
+    # 每周一 09:00 北京时间(=01:00 UTC)推送模拟盘周报
+    - cron: '0 1 * * 1'
+    # 每月 1 日 09:00 北京时间(=01:00 UTC)推送模拟盘月报
+    - cron: '0 1 1 * *'
   workflow_dispatch: {}   # 支持手动触发，用于测试
   push:
     # 兜底触发：每次向仓库推送代码也跑一次扫描，保证上传文件即能出结果
@@ -41,3 +45,31 @@ jobs:
           # 企业微信 webhook 存在仓库 Secrets 中，key 名为 WECOM_WEBHOOK
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
         run: python monitor.py --once
+
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Push weekly report (Monday 09:00)
+        if: github.event.schedule == '0 1 * * 1' || github.event_name == 'workflow_dispatch'
+        env:
+          # 报告专用 webhook 存在仓库 Secrets 中，key 名为 REPORT_WECOM_WEBHOOK
+          REPORT_WECOM_WEBHOOK: ${{ secrets.REPORT_WECOM_WEBHOOK }}
+        run: python paper_report.py --period weekly --state paper_state.json --push
+
+      - name: Push monthly report (1st 09:00)
+        if: github.event.schedule == '0 1 1 * *' || github.event_name == 'workflow_dispatch'
+        env:
+          REPORT_WECOM_WEBHOOK: ${{ secrets.REPORT_WECOM_WEBHOOK }}
+        run: python paper_report.py --period monthly --state paper_state.json --push

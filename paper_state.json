@@ -1,27 +1,29 @@
 {
-  "balance": 100.41,
+  "balance": 100.07,
   "initial_balance": 100.0,
   "peak_equity": 100.47,
   "open_positions": {
     "btc": {
       "symbol": "btc",
       "name": "BTC永续",
-      "direction": "short",
+      "direction": "long",
       "strategy": "归汤",
       "level": "1H",
-      "entry": 76501.8,
-      "sl": 77200.32,
-      "tp": 74406.23,
-      "initial_sl": 77200.32,
+      "entry": 76617.6,
+      "sl": 75903.52,
+      "tp": 78759.84,
+      "initial_sl": 75903.52,
       "sl_protected": false,
-      "size": 109.97,
-      "margin": 1.0997,
+      "size": 107.47,
+      "margin": 1.0747,
       "leverage": 100,
       "risk": 1.0,
-      "open_ts": 1789673957,
-      "open_time": "2026-09-18 03:39:17",
+      "fee_taker": 0.0008,
+      "fee_open": 0.086,
+      "open_ts": 1789674812,
+      "open_time": "2026-09-18 03:53:32",
       "entry_type": "市价委托",
-      "detail": "影线上穿关键位 76530.00 后收回，疑似假突破；0.5回踩位加持(76551.35)；止损=结构位，止盈=目标位（手册条件判定）"
+      "detail": "影线下穿关键位 76530.00 后收回，疑似假突破；0.5回踩位加持(76551.35)；止损=结构位，止盈=目标位（手册条件判定）"
     }
   },
   "closed_trades": [
@@ -260,11 +262,39 @@
       "pnl": -0.06,
       "pnl_pct": -5.304,
       "reason": "反向平仓"
+    },
+    {
+      "symbol": "btc",
+      "name": "BTC永续",
+      "direction": "short",
+      "strategy": "归汤",
+      "level": "1H",
+      "entry": 76501.8,
+      "sl": 77200.32,
+      "tp": 74406.23,
+      "initial_sl": 77200.32,
+      "sl_protected": false,
+      "size": 109.97,
+      "margin": 1.0997,
+      "leverage": 100,
+      "risk": 1.0,
+      "open_ts": 1789673957,
+      "open_time": "2026-09-18 03:39:17",
+      "entry_type": "市价委托",
+      "detail": "影线上穿关键位 76530.00 后收回，疑似假突破；0.5回踩位加持(76551.35)；止损=结构位，止盈=目标位（手册条件判定）",
+      "exit": 76617.6,
+      "exit_ts": 1789674811,
+      "exit_time": "2026-09-18 03:53:31",
+      "fee_close": 0.0881,
+      "fee_total": 0.0881,
+      "pnl": -0.25,
+      "pnl_pct": -15.137,
+      "reason": "反向平仓"
     }
   ],
   "stats": {
     "wins": 7,
-    "losses": 3,
-    "pnl": 0.41
+    "losses": 4,
+    "pnl": 0.16
   }
 }

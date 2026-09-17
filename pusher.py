@@ -60,6 +60,49 @@ def format_signal(sig, extra: str = "") -> str:
     return "\n".join(lines)
 
 
+def format_paper_open(pos: dict, balance: float) -> str:
+    """模拟开仓消息"""
+    dir_cn = "📈 看多 (long)" if pos["direction"] == "long" else "📉 看空 (short)"
+    return "\n".join([
+        f"🟢 **模拟开仓 · {pos['name']}**",
+        f"> 方向：{dir_cn}",
+        f"> 策略：{pos['strategy']}（{pos['level']}）",
+        f"> 入场：**{pos['entry']:.2f}**",
+        f"> 仓位：${pos['size']:,.0f}（保证金 ${pos.get('margin', 0):.2f} @ {pos.get('leverage', 100)}x）",
+        f"> 止损：**{pos['sl']:.2f}**",
+        f"> 止盈：**{pos['tp']:.2f}**",
+        f"> 模拟余额：${balance:,.2f}",
+        "> ⚠️ 模拟单仅作练习记录，不涉及真实资金",
+    ])
+
+
+def format_paper_close(kind: str, trade: dict, balance: float) -> str:
+    """模拟平仓消息。kind: TP/SL/TIMEOUT/REVERSE"""
+    kind_cn = {"TP": "止盈", "SL": "止损", "TIMEOUT": "超时强平", "REVERSE": "反向平仓", "LIQ": "爆仓"}.get(kind, kind)
+    dir_cn = "📈 多单" if trade["direction"] == "long" else "📉 空单"
+    arrow = "+" if trade["pnl"] >= 0 else ""
+    return "\n".join([
+        f"🔴 **模拟平仓 · {trade['name']}**",
+        f"> 原因：{kind_cn}（{dir_cn} {trade['strategy']}）",
+        f"> 入场 {trade['entry']:.2f} → 出场 **{trade['exit']:.2f}**",
+        f"> 盈亏：**{arrow}{trade['pnl']:.2f} USDT**（{arrow}{trade['pnl_pct']:.2f}%）",
+        f"> 模拟余额：${balance:,.2f}",
+    ])
+
+
+def format_paper_status(state: dict) -> str:
+    """模拟账户状态（附在信号推送末尾，当存在持仓时）"""
+    stats = state["stats"]
+    lines = [
+        f"📊 **模拟账户**：余额 ${state['balance']:,.2f}",
+        f"> 累计盈亏：{stats['pnl']:+.2f}（胜 {stats['wins']} / 负 {stats['losses']}）",
+    ]
+    for sym, pos in state["open_positions"].items():
+        dir_cn = "多" if pos["direction"] == "long" else "空"
+        lines.append(f"> 持仓：{pos['name']} {dir_cn} @ {pos['entry']:.2f}（{pos['strategy']}）")
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     wh = load_webhook()
     print("webhook:", (wh[:40] + "..." if wh else "未配置"))

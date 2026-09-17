@@ -5,7 +5,7 @@
 用法：python test_signal.py
 """
 import yaml
-from datafeed import fetch_klines, fetch_gold_snapshot, last_price, pct_change
+from datafeed import fetch_klines, last_price, pct_change
 from signal_engine import to_klines, scan_symbol
 
 
@@ -33,10 +33,6 @@ def main():
                 print("  >> 当前无信号")
         except Exception as e:  # noqa: BLE001
             print(f"  !! 失败: {e}")
-
-    snap = fetch_gold_snapshot()
-    print("=" * 60)
-    print("新浪伦敦金实时:", snap)
 
 
 if __name__ == "__main__":

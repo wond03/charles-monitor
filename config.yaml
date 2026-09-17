@@ -13,15 +13,15 @@ symbols:
   btc:
     enabled: true
     name: "BTC永续"
-    inst: "BTC_USDT"          # Gate.io 永续合约交易对
-    exchange: "gate-futures"  # 主数据源: gate-futures永续 / gate现货 / okx / binance
+    inst: "BTC_USDT"          # Gate.io 永续合约交易对（Weex 侧自动转为 BTCUSDT）
+    exchange: "gate-futures,weex,gate,okx,binance"  # 主源 gate-futures永续，Weex现货为第二备援（仅BTC）
     min_move_pct: 0.15        # 触发信号的最小波动幅度(%)
 
   gold:
     enabled: true
     name: "黄金永续(PAXG代理)"
     inst: "PAXG_USDT"         # PAXG 严格锚定黄金(1:1盎司)，用作黄金1H/15M信号数据源
-    exchange: "gate-futures"  # 永续合约K线，贴近实际交易标的
+    exchange: "gate-futures,gate,okx,binance"  # Weex 无黄金交易对，不加入备援
     min_move_pct: 0.10
 
 # 信号引擎参数

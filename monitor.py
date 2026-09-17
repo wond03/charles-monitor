@@ -42,7 +42,9 @@ def symbol_signals(sym_cfg: dict, eng_cfg: dict, webhook: str) -> list:
     results = []
     name = sym_cfg["name"]
     inst = sym_cfg["inst"]
-    sources = ("gate", "okx", "binance")  # 数据源优先级：Gate.io 主，OKX/Binance 备
+    # 数据源优先级由 config 中 exchange 字段指定（逗号分隔，首个为主源）
+    exch = str(sym_cfg.get("exchange", "gate-futures,gate,okx,binance"))
+    sources = tuple(s.strip() for s in exch.split(",") if s.strip())
     try:
         h1 = fetch_klines(inst, "1h", eng_cfg["h1_lookback"], sources)
         m15 = fetch_klines(inst, "15m", eng_cfg["m15_lookback"], sources)

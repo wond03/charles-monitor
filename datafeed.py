@@ -3,12 +3,14 @@
 查尔斯信号监控系统 · 数据源层
 支持：
   - Gate.io 永续合约  (BTC_USDT / PAXG_USDT 永续K线)  [主，贴近实际交易标的]
+  - Weex 现货V3      (BTCUSDT 等公开K线，免鉴权)     [备，BTC可用/无黄金]
   - Gate.io 现货      (同交易对现货K线)               [备]
   - OKX      (BTC-USDT 等K线)                        [备]
   - Binance  (BTCUSDT 等K线)                         [备]
-  - Gate.io 永续合约K线为主源，现货/OKX/Binance 备援
 统一输出 Kline: [ {ts, open, high, low, close}, ... ] 时间升序
 """
+import json
+import os
 import time
 import requests
 
@@ -96,9 +98,51 @@ def _binance_klines(inst: str, interval: str, limit: int) -> list:
     return sorted(out, key=lambda x: x["ts"])
 
 
+def _weex_klines(inst: str, interval: str, limit: int) -> list:
+    """Weex 现货V3 K线（公开免鉴权）。inst 形如 BTC_USDT -> symbol=BTCUSDT
+    interval: 1m/5m/15m/30m/1h/2h/4h/6h/8h/12h/1d/1w，固定返回约301根
+    响应为数组，索引: 0开盘时间 1开 2高 3低 4收 5量(基础币) 6收盘时间 7成交额 8笔数 9主动买量 10主动买额
+    注意：Weex 无 PAXG 等黄金交易对，仅 BTC 等常规现货可用；
+    本环境 DNS 污染时可用环境变量 WEEX_API_IP 指定 CloudFront IP 直连兜底。
+    """
+    symbol = inst.replace("_", "").replace("-", "")
+    params = {"symbol": symbol, "interval": interval}
+    ip = os.environ.get("WEEX_API_IP", "")
+    if ip:
+        # DNS 污染兜底：curl --resolve 固定 CloudFront IP，保留域名 SNI 与证书校验
+        import subprocess
+        from urllib.parse import urlencode
+        qs = urlencode(params)
+        cmd = ["curl", "-s", "--max-time", str(TIMEOUT),
+               "--resolve", f"api-spot.weex.com:443:{ip}",
+               f"https://api-spot.weex.com/api/v3/market/klines?{qs}"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT + 5)
+        if proc.returncode != 0:
+            raise RuntimeError(f"Weex curl 失败: {proc.stderr.strip() or 'exit ' + str(proc.returncode)}")
+        data = json.loads(proc.stdout)
+    else:
+        r = requests.get("https://api-spot.weex.com/api/v3/market/klines",
+                         params=params, timeout=TIMEOUT)
+        r.raise_for_status()
+        data = r.json()
+    if isinstance(data, dict):  # 错误响应 {"code":xxx,"msg":...}
+        raise RuntimeError(f"Weex {symbol} 不可用: {data.get('msg', data)}")
+    out = []
+    for row in data:
+        out.append({
+            "ts": int(row[0]),
+            "open": float(row[1]),
+            "high": float(row[2]),
+            "low": float(row[3]),
+            "close": float(row[4]),
+        })
+    return sorted(out, key=lambda x: x["ts"])
+
+
 # 各交易所的 interval 映射
 _INTERVAL_MAP = {
     "gate-futures": {"1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d"},
+    "weex": {"1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d"},
     "gate": {"1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d"},
     "okx":  {"1m": "1m", "5m": "5m", "15m": "15m", "1h": "1H", "4h": "4H", "1d": "1D"},
     "binance": {"1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d"},
@@ -106,6 +150,7 @@ _INTERVAL_MAP = {
 
 _SOURCE_FUNCS = {
     "gate-futures": lambda inst, iv, lim: _gate_futures_klines(inst, iv, lim),
+    "weex": lambda inst, iv, lim: _weex_klines(inst, iv, lim),
     "gate": lambda inst, iv, lim: _gate_klines(inst, iv, lim),
     "okx": lambda inst, iv, lim: _okx_klines(inst, iv, lim),
     "binance": lambda inst, iv, lim: _binance_klines(inst, iv, lim),

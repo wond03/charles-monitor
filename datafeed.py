@@ -6,7 +6,7 @@
   - Gate.io 现货      (同交易对现货K线)               [备]
   - OKX      (BTC-USDT 等K线)                        [备]
   - Binance  (BTCUSDT 等K线)                         [备]
-  - 新浪财经  (hf_XAU 伦敦金实时快照，仅用于推送校准)
+  - Gate.io 永续合约K线为主源，现货/OKX/Binance 备援
 统一输出 Kline: [ {ts, open, high, low, close}, ... ] 时间升序
 """
 import time
@@ -125,33 +125,6 @@ def fetch_klines(inst: str, interval: str = "1h", limit: int = 120,
     raise RuntimeError(f"所有数据源均失败: {last_err}")
 
 
-def fetch_gold_snapshot() -> dict:
-    """新浪伦敦金实时快照（仅推送展示用）。hf_XAU 字段:
-    0最新价 1昨收? 2? 3最高 4? 5最低 6时间 7昨收? 8买/卖价 9-11 0 12日期 13名称
-    """
-    try:
-        url = "https://hq.sinajs.cn/list=hf_XAU"
-        r = requests.get(url, headers={
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://finance.sina.com.cn/",
-        }, timeout=TIMEOUT)
-        r.encoding = "gbk"
-        txt = r.text
-        if "hf_XAU" not in txt:
-            return {}
-        payload = txt.split('"')[1].split(",")
-        return {
-            "name": payload[13].strip(),
-            "price": float(payload[0]),
-            "high": float(payload[3]),
-            "low": float(payload[5]),
-            "time": payload[6],
-            "date": payload[12],
-        }
-    except Exception:  # noqa: BLE001
-        return {}
-
-
 def pct_change(klines: list, lookback: int = 24) -> float:
     """当前价相对 N 根K线前的涨跌幅(%)"""
     if len(klines) < 2:
@@ -173,5 +146,4 @@ if __name__ == "__main__":
     gold = fetch_klines("PAXG_USDT", "1h", 10)
     print("BTC 1H x", len(btc), "最新", last_price(btc))
     print("PAXG 1H x", len(gold), "最新", last_price(gold))
-    print("新浪黄金快照", fetch_gold_snapshot())
     print("耗时 %.2fs" % (time.time() - t0))

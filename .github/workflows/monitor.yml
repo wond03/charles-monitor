@@ -29,10 +29,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: 'pip'          # 缓存 pip 依赖，显著缩短运行时间、节省额度
@@ -72,10 +72,10 @@ jobs:
         env:
           # 报告专用 webhook 存在仓库 Secrets 中，key 名为 REPORT_WECOM_WEBHOOK
           REPORT_WECOM_WEBHOOK: ${{ secrets.REPORT_WECOM_WEBHOOK }}
-        run: python paper_report.py --period weekly --state paper_state.json --push --image
+        run: python paper_report.py --period weekly --state paper_state.json --image
 
       - name: Push monthly report (1st 09:00)
         if: github.event.schedule == '0 1 1 * *' || github.event_name == 'workflow_dispatch'
         env:
           REPORT_WECOM_WEBHOOK: ${{ secrets.REPORT_WECOM_WEBHOOK }}
-        run: python paper_report.py --period monthly --state paper_state.json --push --image
+        run: python paper_report.py --period monthly --state paper_state.json --image

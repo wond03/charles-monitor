@@ -257,6 +257,7 @@ def main():
                     except Exception as e:  # noqa: BLE001
                         log.error("平仓推送失败: %s", e, exc_info=True)
                 paper_trader.save_state(state, state_file)
+                save_cooldown(cooldown, cooldown_file)
                 commit_paper_state(state_file, extra_files=[cooldown_file])
             else:
                 save_cooldown(cooldown, cooldown_file)

@@ -7,7 +7,7 @@
   python paper_report.py --period weekly   --state paper_state.json --output 周报.md
   python paper_report.py --period monthly  --state paper_state.json --output 月报.md
   python paper_report.py --period all      --state paper_state.json --output 总览.md
-  python paper_report.py --period weekly --push   # 生成并推送到企业微信（webhook 取 --webhook > 环境变量 REPORT_WECOM_WEBHOOK > config.yaml report_wecom_webhook）
+  python paper_report.py --period weekly --image  # 生成图表图片并推送到企业微信（webhook 取 --webhook > 环境变量 REPORT_WECOM_WEBHOOK > config.yaml report_wecom_webhook）
 
 统计指标：
   - 概览：余额 / 累计盈亏 / 累计收益率 / 最大回撤
@@ -184,18 +184,6 @@ def build_chart_image(state: dict, trades: list, period: str, now_str: str, out_
             d.text((60, y), f"{reason_cn.get(k, k)}  {g['n']}笔", font=font_n, fill="#334155")
             y += 40
 
-    # 当前持仓
-    if state.get("open_positions"):
-        d.text((40, y), "当前持仓", font=font_h1, fill="#1f2937")
-        y += 50
-        for sym, p in state["open_positions"].items():
-            dd = "多" if p.get("direction") == "long" else "空"
-            sl_dist = abs(p.get("entry", 0) - p.get("sl", 0))
-            tp_dist = abs(p.get("tp", 0) - p.get("entry", 0))
-            rrc = tp_dist / sl_dist if sl_dist else 0
-            d.text((60, y), f"{p.get('name', sym)}  {dd}  {p.get('strategy', '')}  @{p.get('entry', 0):.2f}  盈亏比{rrc:.2f}", font=font_n, fill="#334155")
-            y += 40
-
     d.text((40, H - 56), "⚠️ 模拟单仅作练习记录，不涉及真实资金", font=font_s, fill="#94a3b8")
     img.save(out_path, "PNG")
     return out_path
@@ -328,16 +316,6 @@ def build_report(state: dict, trades: list, period: str, now_str: str) -> str:
             L.append(f"| {t.get('exit_time', '')[:16]} | {t.get('name', '')} | {d} | {t.get('strategy', '')} | {rc} | {t.get('entry', 0):.2f} → {t.get('exit', 0):.2f} | **{arrow}{pnl:.2f}** |")
         L.append("")
 
-    if state.get("open_positions"):
-        L += ["## 七、当前持仓", "", "| 品种 | 方向 | 策略 | 入场 | 止损 | 止盈 | 盈亏比 | 开仓时间 |", "|------|------|------|------|------|------|--------|---------|"]
-        for sym, p in state["open_positions"].items():
-            d = "多" if p.get("direction") == "long" else "空"
-            sl_dist = abs(p.get("entry", 0) - p.get("sl", 0))
-            tp_dist = abs(p.get("tp", 0) - p.get("entry", 0))
-            rr = tp_dist / sl_dist if sl_dist else 0
-            L.append(f"| {p.get('name', sym)} | {d} | {p.get('strategy', '')} | {p.get('entry', 0):.2f} | {p.get('sl', 0):.2f} | {p.get('tp', 0):.2f} | {rr:.2f} | {p.get('open_time', '')[:16]} |")
-        L.append("")
-
     return "\n".join(L)
 
 
@@ -408,15 +386,6 @@ def build_push_text(state: dict, trades: list, period: str, now_str: str) -> str
             L.append(f"**平仓原因**：{parts}")
             L.append("")
 
-    if state.get("open_positions"):
-        L.append("**当前持仓**：")
-        for sym, p in state["open_positions"].items():
-            d = "多" if p.get("direction") == "long" else "空"
-            sl_dist = abs(p.get("entry", 0) - p.get("sl", 0))
-            tp_dist = abs(p.get("tp", 0) - p.get("entry", 0))
-            rr_cur = tp_dist / sl_dist if sl_dist else 0
-            L.append(f"> {p.get('name', sym)} {d} {p.get('strategy', '')} @ {p.get('entry', 0):.2f} 盈亏比{rr_cur:.2f}")
-        L.append("")
     L.append("> ⚠️ 模拟单仅作练习记录，不涉及真实资金")
 
     text = "\n".join(L)
@@ -468,7 +437,6 @@ def main():
     ap.add_argument("--period", choices=["weekly", "monthly", "all"], default="weekly")
     ap.add_argument("--state", default="paper_state.json")
     ap.add_argument("--output", default="")
-    ap.add_argument("--push", action="store_true", help="生成后推送到企业微信")
     ap.add_argument("--image", action="store_true", help="生成图表图片并推送图片消息（需 Pillow）")
     ap.add_argument("--webhook", default="", help="报告推送 webhook URL（优先级最高）")
     args = ap.parse_args()
@@ -481,18 +449,13 @@ def main():
         with open(args.output, "w", encoding="utf-8") as f:
             f.write(report)
         print(f"已生成: {args.output}")
-    if args.push:
-        push_text = build_push_text(state, trades, args.period, now_str)
-        webhook = load_webhook(args.webhook)
-        send_wecom(webhook, push_text)
-        print("已推送企业微信")
     if args.image:
         webhook = load_webhook(args.webhook)
-        img_path = args.output + ".png" if args.output else f"report_{args.period}.png"
+        img_path = args.output + ".png" if args.output else f"report_{args.period}_{time.strftime('%Y%m%d')}.png"
         build_chart_image(state, trades, args.period, now_str, img_path)
         send_wecom_image(webhook, img_path)
         print(f"已生成图表并推送: {img_path}")
-    if not args.output and not args.push and not args.image:
+    if not args.output and not args.image:
         print(report)
 
 

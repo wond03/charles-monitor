@@ -61,6 +61,7 @@ paper_trading:
   enabled: true
   initial_balance: 100
   leverage: 100
+  cost_per_trade_usdt: 5
   risk_per_trade_pct: 1.0
   use_structure_sl_tp: true
   breakeven_rr: 1.5

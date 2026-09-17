@@ -71,6 +71,17 @@ def _size(entry: float, sl: float, risk_usdt: float) -> float:
     return risk_usdt / dist
 
 
+def _size_by_cost(cost_usdt: float, leverage: int, fee_taker: float) -> float:
+    """按固定开仓成本(USDT)计算名义仓位：
+    成本 = 保证金 + 手续费 = size/leverage + size*fee_taker
+    → size = cost / (1/leverage + fee_taker)，与杠杆无关（改杠杆时 size 反向变化使成本恒定）
+    """
+    denom = 1.0 / max(leverage, 1) + fee_taker
+    if denom <= 0:
+        return 0.0
+    return cost_usdt / denom
+
+
 def open_position(state: dict, sym: str, sig, cfg: dict):
     """
     开模拟仓。返回 position dict；已有持仓或参数异常返回 None。
@@ -83,7 +94,9 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
     if sig.direction not in ("long", "short"):
         return None
     balance = state["balance"]
-    risk = balance * cfg["risk_per_trade_pct"] / 100.0
+    leverage = int(cfg.get("leverage", 100) or 1)
+    fee_taker = float(cfg.get("fee_taker", 0.0008) or 0.0008)
+    cost = float(cfg.get("cost_per_trade_usdt", 5) or 5)  # 每次开仓固定成本 = 保证金 + 手续费
     sl_default, tp_default = _sl_tp(sig.price, sig.direction, cfg["sl_pct"], cfg["tp_rr"])
     sl, tp = sl_default, tp_default
     detail = sig.detail
@@ -99,22 +112,22 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
                 detail = (detail or "") + "；止损=结构位，止盈=目标位（手册条件判定）"
             else:
                 detail = (detail or "") + f"；结构止损过宽({dist_pct:.2f}%)，回退固定止损{cfg['sl_pct']}%"
-    size = _size(sig.price, sl, risk)
+    size = _size_by_cost(cost, leverage, fee_taker)
     if size <= 0:
         return None
     min_size = float(cfg.get("min_size_usdt", 5) or 5)
     if size < min_size:
         log.info("仓位低于最小下单量(%.2f USDT)，跳过开仓 %s size=%.2f", min_size, sig.symbol, size)
         return None
-    fee_taker = float(cfg.get("fee_taker", 0.0008) or 0.0008)
     fee_open = size * fee_taker  # 开仓手续费（Weex 市价单 Taker 0.08%）
     if state["balance"] < fee_open:
         log.info("模拟余额不足以支付开仓手续费(%.4f)，跳过开仓 %s", fee_open, sig.symbol)
         return None
     state["balance"] = round(state["balance"] - fee_open, 2)
     now = int(time.time())
-    leverage = int(cfg.get("leverage", 100) or 1)
     margin = size / leverage
+    # 实际止损风险额（按当前止损距离）：用于保本/锁利阈值
+    risk = size * abs(sig.price - sl) / sig.price if sig.price > 0 else 0.0
     pos = {
         "symbol": sym,
         "name": sig.symbol,

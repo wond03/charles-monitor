@@ -19,6 +19,10 @@ import json
 import os
 import time
 
+# 统一使用北京时间（GitHub runner 默认 UTC）
+os.environ.setdefault("TZ", "Asia/Shanghai")
+time.tzset()
+
 DEFAULT_STATE = {
     "balance": 100.0,            # 当前余额(USDT)
     "initial_balance": 100.0,    # 初始资金

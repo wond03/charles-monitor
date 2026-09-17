@@ -21,6 +21,10 @@ import time
 
 import yaml
 
+# 统一使用北京时间（GitHub runner 默认 UTC）
+os.environ.setdefault("TZ", "Asia/Shanghai")
+time.tzset()
+
 from datafeed import fetch_klines, last_price, pct_change
 from pusher import (load_webhook, send_wecom, send_test, format_signal,
                     format_paper_open, format_paper_close, format_paper_status)

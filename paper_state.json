@@ -1,25 +1,27 @@
 {
-  "balance": 100.25,
+  "balance": 100.47,
   "initial_balance": 100.0,
-  "peak_equity": 100.26,
+  "peak_equity": 100.47,
   "open_positions": {
     "btc": {
       "symbol": "btc",
       "name": "BTC永续",
-      "direction": "",
-      "strategy": "0.5回踩",
+      "direction": "long",
+      "strategy": "归汤",
       "level": "1H",
-      "entry": 76676.7,
-      "sl": 77290.11,
-      "tp": 75449.87,
-      "size": 124.41,
-      "margin": 1.2441,
+      "entry": 76542.4,
+      "sl": 75903.52,
+      "tp": 78459.04,
+      "initial_sl": 75903.52,
+      "sl_protected": false,
+      "size": 120.37,
+      "margin": 1.2037,
       "leverage": 100,
       "risk": 1.0,
-      "open_ts": 1789664324,
-      "open_time": "2026-09-18 00:58:44",
-      "entry_type": "限价委托",
-      "detail": "价格触及斐波那契0.5回踩位 76551.35"
+      "open_ts": 1789673735,
+      "open_time": "2026-09-18 03:35:35",
+      "entry_type": "市价委托",
+      "detail": "影线下穿关键位 76530.00 后收回，疑似假突破；0.5回踩位加持(76551.35)；止损=结构位，止盈=目标位（手册条件判定）"
     }
   },
   "closed_trades": [
@@ -208,11 +210,35 @@
       "pnl": -0.01,
       "pnl_pct": -0.526,
       "reason": "趋势转换出场"
+    },
+    {
+      "symbol": "btc",
+      "name": "BTC永续",
+      "direction": "",
+      "strategy": "0.5回踩",
+      "level": "1H",
+      "entry": 76676.7,
+      "sl": 77290.11,
+      "tp": 75449.87,
+      "size": 124.41,
+      "margin": 1.2441,
+      "leverage": 100,
+      "risk": 1.0,
+      "open_ts": 1789664324,
+      "open_time": "2026-09-18 00:58:44",
+      "entry_type": "限价委托",
+      "detail": "价格触及斐波那契0.5回踩位 76551.35",
+      "exit": 76542.4,
+      "exit_ts": 1789673734,
+      "exit_time": "2026-09-18 03:35:34",
+      "pnl": 0.22,
+      "pnl_pct": 17.515,
+      "reason": "反向平仓"
     }
   ],
   "stats": {
-    "wins": 6,
+    "wins": 7,
     "losses": 2,
-    "pnl": 0.25
+    "pnl": 0.47
   }
 }

@@ -121,7 +121,13 @@ systemctl daemon-reload && systemctl enable --now charles-monitor
 - 模拟账户状态保存在 `paper_state.json`，GitHub Actions 云端运行会自动提交回仓库，状态不丢；
 - 推送消息中会附带模拟账户余额、保证金与持仓，方便手机查看。
 
-## 六、风险提示
+## 六、日志与排障
+
+- 日志统一写入 `logs/monitor.log`（2MB 轮转，保留 5 个备份），同时输出到控制台；GitHub Actions 运行日志在仓库 Actions 页可见；
+- 时间统一北京时间；级别默认 INFO，可用 `CHARLES_LOG_LEVEL=DEBUG` 环境变量或 `--log-level DEBUG` 调细；
+- 关键日志点：启动配置摘要、各数据源成功/失败与备援切换、信号推送、模拟开/平仓（含原因与盈亏）、保本/锁利上移、扫描异常（含完整堆栈）。
+
+## 七、风险提示
 
 - 本系统为规则化辅助提醒工具，信号质量取决于策略参数与市场环境；
 - 手册要求所有策略**先回测半年以上再实盘**；

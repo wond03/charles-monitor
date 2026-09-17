@@ -97,6 +97,29 @@ systemctl daemon-reload && systemctl enable --now charles-monitor
 | `scanner.cooldown_hours` | 6 | 同信号冷却时长（小时） |
 | `scanner.push_test_on_start` | true | 启动时发送测试消息 |
 
+## 五·五、模拟盘（Paper Trading）
+
+信号命中后系统**自动开模拟单**（不涉及真实资金），用于练习验证策略胜率。
+
+| 配置项 | 默认 | 说明 |
+|--------|------|------|
+| `paper_trading.enabled` | true | 模拟盘总开关（false 关闭） |
+| `paper_trading.initial_balance` | 100 | 初始模拟资金(USDT) |
+| `paper_trading.leverage` | 100 | 杠杆倍数（100x：价格反向波动 1% 即爆仓） |
+| `paper_trading.risk_per_trade_pct` | 1.0 | 每笔风险占余额%(手册单笔风控1%) |
+| `paper_trading.sl_pct` | 0.8 | 止损距离%(入场价上下)，须小于爆仓线 100/杠杆 % |
+| `paper_trading.tp_rr` | 2.0 | 止盈 = 止损距离 × 倍数（0.8%×2=1.6%） |
+| `paper_trading.max_hold_hours` | 24 | 最长持仓时间，超时按市价强平 |
+| `paper_trading.state_file` | paper_state.json | 模拟账户状态文件 |
+
+行为说明：
+- 信号命中 → 推送提醒 + 自动开模拟仓（同品种已有同向持仓则忽略）；
+- 反向信号 → 先平旧仓（推送平仓记录）再反手开新仓；
+- 每轮扫描检查持仓：触发止损/止盈/爆仓/超时 24h → 自动平仓并推送结果；
+- 爆仓规则：价格反向波动达到 100/杠杆 %（100x → 1%）时亏光保证金强平，止损距离必须小于该值才会先止损（当前 0.8% < 1%）；
+- 模拟账户状态保存在 `paper_state.json`，GitHub Actions 云端运行会自动提交回仓库，状态不丢；
+- 推送消息中会附带模拟账户余额、保证金与持仓，方便手机查看。
+
 ## 六、风险提示
 
 - 本系统为规则化辅助提醒工具，信号质量取决于策略参数与市场环境；

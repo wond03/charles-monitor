@@ -16,6 +16,9 @@
 """
 from dataclasses import dataclass, field
 from typing import List, Optional
+import logging
+
+log = logging.getLogger(__name__)
 
 # ---------- 数据结构 ----------
 
@@ -405,4 +408,6 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
             out.append(s2)
 
     # 附：1H 趋势状态（不推送，供日志）
+    log.debug("[%s] 引擎扫描完成：%d 个信号 %s", symbol, len(out),
+              [(f"{s.strategy}/{s.level}/{s.direction}@{s.price:.2f}") for s in out])
     return out

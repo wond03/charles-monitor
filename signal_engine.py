@@ -239,18 +239,21 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
     s_bos = detect_bos(klines_h1, radius_h1)
     if s_bos:
         s_bos.symbol, s_bos.level = symbol, "1H"
+        s_bos.entry_type = "市价委托"
         out.append(s_bos)
 
     # MSS（回踩型转势）
     s_mss = detect_mss(klines_h1, radius_h1)
     if s_mss:
         s_mss.symbol, s_mss.level = symbol, "1H"
+        s_mss.entry_type = "市价委托"
         out.append(s_mss)
 
     # 归汤·假突破（1H 关键水平）
     s_fake = detect_fake_breakout(klines_h1, h1_levels)
     if s_fake:
         s_fake.symbol, s_fake.level = symbol, "1H"
+        s_fake.entry_type = "市价委托"
         out.append(s_fake)
 
     # 0.5 回踩（1H）
@@ -275,6 +278,7 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
             if m15_fvg == "bull" or m15_trend == "up":
                 s.symbol, s.level = symbol, "15M"
                 s.strategy = "保底"
+                s.entry_type = "条件委托"
                 s.key_levels = [lv["price"] for lv in h1_levels[:4]]
                 s.detail = (f"1H趋势向上 + 15M {s.strategy_orig()}确认 + FVG支持；"
                             f"参考止损：1H结构下方，目标1:5")
@@ -283,6 +287,7 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
             if m15_fvg == "bear" or m15_trend == "down":
                 s.symbol, s.level = symbol, "15M"
                 s.strategy = "保底"
+                s.entry_type = "条件委托"
                 s.key_levels = [lv["price"] for lv in h1_levels[:4]]
                 s.detail = (f"1H趋势向下 + 15M {s.strategy_orig()}确认 + FVG支持；"
                             f"参考止损：1H结构上方，目标1:5")

@@ -29,8 +29,19 @@ time.tzset()
 from datafeed import fetch_klines, last_price, pct_change
 from pusher import (load_webhook, send_wecom, send_test, format_signal,
                     format_paper_open, format_paper_close, format_paper_status)
-from signal_engine import to_klines, scan_symbol
+from signal_engine import to_klines, scan_symbol, trend_by_ma, vol_surge
 import paper_trader
+
+# 可触发严谨反手的结构确认类策略（手册 4.5 换边规则）
+REVERSE_STRATEGIES = ("模板", "保底", "BOS", "MSS")
+# 级别权重：数值越大级别越高（反手要求反向信号级别 >= 持仓级别）
+LEVEL_RANK = {"15M": 1, "1H": 2, "4H+15M": 3, "1H+15M": 3, "4H": 4}
+
+
+def _level_rank_of(sig_or_pos) -> int:
+    """取信号/持仓的级别权重；未知级别按 0 处理（不满足反手条件）"""
+    lv = getattr(sig_or_pos, "level", None) or (sig_or_pos.get("level") if isinstance(sig_or_pos, dict) else None)
+    return LEVEL_RANK.get(lv, 0)
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s")
@@ -42,9 +53,11 @@ def load_config(path: str = "config.yaml") -> dict:
         return yaml.safe_load(f)
 
 
-def symbol_signals(sym_cfg: dict, eng_cfg: dict, webhook: str) -> list:
-    """扫描单个标的，返回 (signal, extra, price) 列表"""
-    results = []
+def symbol_signals(sym_cfg: dict, eng_cfg: dict, webhook: str) -> dict:
+    """扫描单个标的，返回：
+    {"signals": [(sig, extra, price)...], "h4_trend": str, "vol_surge": bool, "price": float}
+    """
+    result = {"signals": [], "h4_trend": "flat", "vol_surge": False, "price": 0.0}
     name = sym_cfg["name"]
     inst = sym_cfg["inst"]
     # 数据源优先级由 config 中 exchange 字段指定（逗号分隔，首个为主源）
@@ -56,15 +69,21 @@ def symbol_signals(sym_cfg: dict, eng_cfg: dict, webhook: str) -> list:
         h4 = fetch_klines(inst, "4h", eng_cfg["h4_lookback"], sources)
     except Exception as e:  # noqa: BLE001
         log.warning("[%s] 数据获取失败: %s", name, e)
-        return results
+        return result
 
     sigs = scan_symbol(to_klines(h1), to_klines(m15), to_klines(h4), name, eng_cfg)
     chg = pct_change(h1, 24)
     price = last_price(h1)
     extra = f"24h涨跌：{chg:+.2f}%"
+    h1_ma = eng_cfg.get("trend_ma", 50)
+    vol_mult = float(eng_cfg.get("vol_surge_mult", 2.5))
+    if len(h4) > 20:
+        result["h4_trend"] = trend_by_ma(to_klines(h4), min(h1_ma * 2, 60))
+    result["vol_surge"] = vol_surge(to_klines(h1), mult=vol_mult) or vol_surge(to_klines(m15), mult=vol_mult)
+    result["price"] = price
     for s in sigs:
-        results.append((s, extra, price))
-    return results
+        result["signals"].append((s, extra, price))
+    return result
 
 
 def commit_paper_state(state_file: str, extra_files: list = None) -> None:
@@ -109,17 +128,33 @@ def save_cooldown(cooldown: dict, path: str) -> None:
 
 
 def _paper_on_signal(state: dict, sym_key: str, sig, paper_cfg: dict, webhook: str) -> None:
-    """信号命中后的模拟单处理：反向持仓先平，再开新仓"""
+    """信号命中后的模拟单处理（对应手册 4.5 换边规则）：
+    - 无持仓：直接开新仓
+    - 反向持仓：严谨反手——仅当反向信号 级别>=持仓级别 且为结构确认类策略
+      （模板/保底/BOS/MSS）才平旧仓反手；否则保留旧仓，只推送信号供人工判断
+    """
     try:
         pos = state["open_positions"].get(sym_key)
         if pos and pos["direction"] != sig.direction:
-            trade = paper_trader.close_position(state, sym_key, sig.price, "反向平仓")
-            if trade:
-                send_wecom(webhook, format_paper_close("REVERSE", trade, state["balance"]))
-                log.info("模拟平仓(反手): %s", trade["name"])
+            same_or_higher = _level_rank_of(sig) >= _level_rank_of(pos)
+            struct_confirm = getattr(sig, "strategy", "") in REVERSE_STRATEGIES
+            if same_or_higher and struct_confirm:
+                trade = paper_trader.close_position(state, sym_key, sig.price, "反向平仓")
+                if trade:
+                    try:
+                        send_wecom(webhook, format_paper_close("REVERSE", trade, state["balance"]))
+                    except Exception as we:  # noqa: BLE001
+                        log.warning("反手平仓推送失败: %s", we)
+                    log.info("模拟平仓(反手): %s", trade["name"])
+            else:
+                log.info("反向信号不满足反手条件(级别/策略)，保留持仓: %s %s，仅推送信号提醒",
+                         pos["name"], pos["direction"])
         new_pos = paper_trader.open_position(state, sym_key, sig, paper_cfg)
         if new_pos:
-            send_wecom(webhook, format_paper_open(new_pos, state["balance"]))
+            try:
+                send_wecom(webhook, format_paper_open(new_pos, state["balance"]))
+            except Exception as we:  # noqa: BLE001
+                log.warning("开仓推送失败: %s", we)
             log.info("模拟开仓: %s %s @%.2f",
                      new_pos["name"], new_pos["direction"], new_pos["entry"])
     except Exception as e:  # noqa: BLE001
@@ -159,11 +194,14 @@ def main():
         try:
             state = paper_trader.load_state(state_file) if paper_on else {}
             prices = {}
+            ctxs = {}  # {sym: {"price", "h4_trend", "vol_surge"}} 供持仓管理做条件判定
             for key, sym_cfg in cfg["symbols"].items():
                 if not sym_cfg.get("enabled"):
                     continue
-                found = symbol_signals(sym_cfg, eng_cfg, webhook)
-                for sig, extra, price in found:
+                res = symbol_signals(sym_cfg, eng_cfg, webhook)
+                ctxs[key] = {"price": res["price"], "h4_trend": res["h4_trend"],
+                             "vol_surge": res["vol_surge"]}
+                for sig, extra, price in res["signals"]:
                     prices[key] = price
                     ckey = ":".join([sig.symbol, sig.strategy, sig.direction, sig.level])
                     now = time.time()
@@ -187,8 +225,8 @@ def main():
                         _paper_on_signal(state, key, sig, paper_cfg, webhook)
 
             if paper_on and paper_cfg:
-                # 管理持仓：止盈/止损/超时，触发即推送
-                for kind, trade in paper_trader.manage_positions(state, prices, paper_cfg):
+                # 管理持仓：止盈/止损/超时/出量/趋势转换，触发即推送
+                for kind, trade in paper_trader.manage_positions(state, ctxs, paper_cfg):
                     try:
                         send_wecom(webhook, format_paper_close(kind, trade, state["balance"]))
                         log.info("模拟平仓: %s %s %s (%s)", trade["name"], kind, trade["pnl"], trade["reason"])

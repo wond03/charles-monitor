@@ -57,7 +57,7 @@ def symbol_signals(sym_cfg: dict, eng_cfg: dict, webhook: str) -> dict:
     """扫描单个标的，返回：
     {"signals": [(sig, extra, price)...], "h4_trend": str, "vol_surge": bool, "price": float}
     """
-    result = {"signals": [], "h4_trend": "flat", "vol_surge": False, "price": 0.0}
+    result = {"signals": [], "h4_trend": "flat", "h4_prev_trend": "flat", "vol_surge": False, "price": 0.0}
     name = sym_cfg["name"]
     inst = sym_cfg["inst"]
     # 数据源优先级由 config 中 exchange 字段指定（逗号分隔，首个为主源）
@@ -79,6 +79,9 @@ def symbol_signals(sym_cfg: dict, eng_cfg: dict, webhook: str) -> dict:
     vol_mult = float(eng_cfg.get("vol_surge_mult", 2.5))
     if len(h4) > 20:
         result["h4_trend"] = trend_by_ma(to_klines(h4), min(h1_ma * 2, 60))
+        # 前一状态：供趋势转换出场判定（仅当趋势刚反转时平仓，避免趋势持续时反复平仓）
+        if len(h4) > 21:
+            result["h4_prev_trend"] = trend_by_ma(to_klines(h4[:-1]), min(h1_ma * 2, 60))
     result["vol_surge"] = vol_surge(to_klines(h1), mult=vol_mult) or vol_surge(to_klines(m15), mult=vol_mult)
     result["price"] = price
     for s in sigs:
@@ -216,6 +219,7 @@ def main():
                     continue
                 res = symbol_signals(sym_cfg, eng_cfg, webhook)
                 ctxs[key] = {"price": res["price"], "h4_trend": res["h4_trend"],
+                             "h4_prev_trend": res["h4_prev_trend"],
                              "vol_surge": res["vol_surge"]}
                 log.debug("[%s] 扫描结果：%d 个信号，h4_trend=%s，vol_surge=%s，price=%.2f",
                           sym_cfg["name"], len(res["signals"]), res["h4_trend"],

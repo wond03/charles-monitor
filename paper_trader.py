@@ -235,13 +235,16 @@ def manage_positions(state: dict, ctxs: dict, cfg: dict) -> list:
                 events.append(("VOL_TP", ev))
                 continue
         # 趋势转换出场：手册"大级别趋势反转，直接出场"
+        # 仅当 4H 趋势刚发生反转（up->down / down->up）时平掉旧方向持仓；
+        # 趋势持续（含 flat）时不平仓，避免"逆势即平"导致刚开仓被秒平、止盈止损永远等不到
         h4t = ctx.get("h4_trend")
-        if h4t == "down" and pos["direction"] == "long":
+        h4_prev = ctx.get("h4_prev_trend")
+        if h4_prev == "up" and h4t == "down" and pos["direction"] == "long":
             ev = close_position(state, sym, price, "趋势转换出场")
             if ev:
                 events.append(("TREND_EXIT", ev))
                 continue
-        if h4t == "up" and pos["direction"] == "short":
+        if h4_prev == "down" and h4t == "up" and pos["direction"] == "short":
             ev = close_position(state, sym, price, "趋势转换出场")
             if ev:
                 events.append(("TREND_EXIT", ev))

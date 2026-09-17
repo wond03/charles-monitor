@@ -94,7 +94,7 @@ systemctl daemon-reload && systemctl enable --now charles-monitor
 | `engine.fvg_min_pct` | 0.05 | FVG 最小缺口幅度(%) |
 | `engine.trend_ma` | 50 | 趋势均线周期 |
 | `scanner.scan_interval_seconds` | 300 | 扫描间隔（秒） |
-| `scanner.cooldown_hours` | 6 | 同信号冷却时长（小时） |
+| `scanner.cooldown_hours` | 4 | 同信号冷却时长（小时） |
 | `scanner.push_test_on_start` | true | 启动时发送测试消息 |
 
 ## 五·五、模拟盘（Paper Trading）

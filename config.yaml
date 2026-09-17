@@ -1,0 +1,46 @@
+# =============================================
+# 查尔斯信号监控系统 配置文件
+# 使用前必读：把企业微信机器人 webhook 填入下方
+# =============================================
+
+# 企业微信群机器人 webhook（必填）
+# 获取方式：企业微信群 → 右键群 → 添加群机器人 → 复制 Webhook 地址
+# 也可通过环境变量 WECOM_WEBHOOK 传入，优先级高于此配置
+wecom_webhook: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=9dfe55d7-466f-4a34-b5dd-5d86e7251b24"
+
+# 监控标的（true/false 控制开关）
+symbols:
+  btc:
+    enabled: true
+    name: "BTC永续"
+    inst: "BTC_USDT"          # Gate.io 永续合约交易对
+    exchange: "gate-futures"  # 主数据源: gate-futures永续 / gate现货 / okx / binance
+    min_move_pct: 0.15        # 触发信号的最小波动幅度(%)
+
+  gold:
+    enabled: true
+    name: "黄金永续(PAXG代理)"
+    inst: "PAXG_USDT"         # PAXG 严格锚定黄金(1:1盎司)，用作黄金1H/15M信号数据源
+    exchange: "gate-futures"  # 永续合约K线，贴近实际交易标的
+    min_move_pct: 0.10
+
+# 信号引擎参数
+engine:
+  h1_lookback: 120            # 1H 级别参与计算的K线根数
+  m15_lookback: 120           # 15M 级别参与计算的K线根数
+  h4_lookback: 120            # 4H 级别参与计算的K线根数
+  pivot_radius_h1: 3          # 1H swing 高/低点判断半径(左右各几根)
+  pivot_radius_m15: 5         # 15M swing 半径
+  level_cluster_pct: 0.15     # 关键水平聚类容差(%)
+  fvg_min_pct: 0.05           # FVG缺口最小幅度(%)
+  trend_ma: 50                # 趋势判断均线周期(1H)
+
+# 扫描与推送（日内交易模式）
+scanner:
+  scan_interval_seconds: 300  # 本地部署的扫描间隔(秒)；GitHub Actions 云端由 cron '*/15' 控制
+  cooldown_hours: 4           # 同一信号冷却时间(小时)：日内交易持仓周期短，4小时防刷屏
+  push_test_on_start: true    # 启动时发送一条测试消息
+
+# 新浪实时金价(仅用于推送中附带实时伦敦金价，不依赖它做信号)
+sina:
+  gold_snapshot_url: "https://hq.sinajs.cn/list=hf_XAU"

@@ -61,15 +61,21 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Ensure CJK font (for charts)
+        run: |
+          if [ ! -f /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
+          fi
+
       - name: Push weekly report (Monday 09:00)
         if: github.event.schedule == '0 1 * * 1' || github.event_name == 'workflow_dispatch'
         env:
           # 报告专用 webhook 存在仓库 Secrets 中，key 名为 REPORT_WECOM_WEBHOOK
           REPORT_WECOM_WEBHOOK: ${{ secrets.REPORT_WECOM_WEBHOOK }}
-        run: python paper_report.py --period weekly --state paper_state.json --push
+        run: python paper_report.py --period weekly --state paper_state.json --push --image
 
       - name: Push monthly report (1st 09:00)
         if: github.event.schedule == '0 1 1 * *' || github.event_name == 'workflow_dispatch'
         env:
           REPORT_WECOM_WEBHOOK: ${{ secrets.REPORT_WECOM_WEBHOOK }}
-        run: python paper_report.py --period monthly --state paper_state.json --push
+        run: python paper_report.py --period monthly --state paper_state.json --push --image

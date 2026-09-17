@@ -102,6 +102,10 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
     size = _size(sig.price, sl, risk)
     if size <= 0:
         return None
+    min_size = float(cfg.get("min_size_usdt", 5) or 5)
+    if size < min_size:
+        log.info("仓位低于最小下单量(%.2f USDT)，跳过开仓 %s size=%.2f", min_size, sig.symbol, size)
+        return None
     fee_taker = float(cfg.get("fee_taker", 0.0008) or 0.0008)
     fee_open = size * fee_taker  # 开仓手续费（Weex 市价单 Taker 0.08%）
     if state["balance"] < fee_open:

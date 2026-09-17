@@ -30,6 +30,176 @@ time.tzset()
 PERIOD_HOURS = {"weekly": 7 * 24, "monthly": 30 * 24, "all": None}
 MAX_PUSH_BYTES = 4000  # 企微 markdown 上限 4096，留余量
 
+# ---------------- Pillow 图表 ----------------
+try:
+    from PIL import Image, ImageDraw, ImageFont
+    _HAS_PIL = True
+except Exception:  # noqa: BLE001
+    _HAS_PIL = False
+
+_FONT_CANDIDATES = [
+    "fonts/NotoSansCJKsc-Regular.otf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+]
+
+
+def _find_font(size: int):
+    """查找可用的中文字体，找不到退回 DejaVu"""
+    for p in _FONT_CANDIDATES:
+        if os.path.exists(p):
+            try:
+                return ImageFont.truetype(p, size)
+            except Exception:  # noqa: BLE001
+                continue
+    return ImageFont.load_default()
+
+
+def build_chart_image(state: dict, trades: list, period: str, now_str: str, out_path: str):
+    """用 Pillow 生成一页综合图表 PNG（资金曲线/盈亏分布/策略分布/持仓）"""
+    if not _HAS_PIL:
+        raise RuntimeError("缺少 Pillow，请先 pip install pillow")
+
+    W, H = 1200, 1560
+    img = Image.new("RGB", (W, H), "white")
+    d = ImageDraw.Draw(img)
+    font_title = _find_font(44)
+    font_h1 = _find_font(30)
+    font_h2 = _find_font(24)
+    font_n = _find_font(26)
+    font_s = _find_font(22)
+
+    initial = state.get("initial_balance", 100.0)
+    balance = state.get("balance", initial)
+    total_pnl = state.get("stats", {}).get("pnl", balance - initial)
+    n = len(trades)
+    wins = sum(1 for t in trades if t.get("pnl", 0) >= 0)
+    win_rate = wins / n * 100 if n else 0.0
+    profits = [t["pnl"] for t in trades if t.get("pnl", 0) > 0]
+    losses_amt = [t["pnl"] for t in trades if t.get("pnl", 0) < 0]
+    avg_win = sum(profits) / len(profits) if profits else 0.0
+    avg_loss = abs(sum(losses_amt) / len(losses_amt)) if losses_amt else 0.0
+    rr = avg_win / avg_loss if avg_loss > 0 else 0.0
+    mdd = max_drawdown_from_trades(trades, initial)
+    ret_pct = (balance - initial) / initial * 100 if initial else 0.0
+    period_cn = {"weekly": "周报", "monthly": "月报", "all": "总览"}[period]
+
+    y = 30
+    d.text((40, y), f"模拟盘{period_cn}  {now_str}", font=font_title, fill="#1f2937")
+    y += 70
+
+    # 指标卡片（5列2行）
+    cards = [
+        ("当前余额", f"{balance:,.2f} USDT", "#2563eb"),
+        ("累计盈亏", f"{total_pnl:+.2f} ({ret_pct:+.2f}%)", "#16a34a" if total_pnl >= 0 else "#dc2626"),
+        ("最大回撤", f"{mdd:.2f}%", "#dc2626"),
+        ("胜率", f"{win_rate:.1f}%", "#7c3aed"),
+        ("盈亏比", f"{rr:.2f}", "#ea580c"),
+    ]
+    cw, ch = (W - 40 - 4 * 20) // 5, 92
+    for i, (k, v, color) in enumerate(cards):
+        x = 40 + i * (cw + 20)
+        d.rounded_rectangle((x, y, x + cw, y + ch), radius=12, fill="#f8fafc", outline="#e2e8f0", width=2)
+        d.text((x + 16, y + 16), k, font=font_s, fill="#64748b")
+        d.text((x + 16, y + 44), v, font=font_h2, fill=color)
+    y += ch + 30
+
+    # 资金曲线
+    d.text((40, y), "权益曲线（按平仓顺序）", font=font_h1, fill="#1f2937")
+    y += 52
+    chart_x, chart_y, chart_w, chart_h = 70, y, W - 140, 240
+    d.rectangle((chart_x, chart_y, chart_x + chart_w, chart_y + chart_h), outline="#cbd5e1", width=2)
+    # 网格线
+    for i in range(1, 5):
+        gy = chart_y + chart_h * i // 5
+        d.line((chart_x, gy, chart_x + chart_w, gy), fill="#f1f5f9", width=1)
+    pts = [(chart_x, chart_y + chart_h)]
+    if trades:
+        bal = initial
+        cum = [initial]
+        for t in trades:
+            bal += t.get("pnl", 0.0)
+            cum.append(bal)
+        lo, hi = min(cum + [initial]), max(cum + [initial])
+        if hi == lo:
+            hi, lo = lo + 1, lo - 1
+        def px(i_):
+            return chart_x + chart_w * i_ / (len(cum) - 1) if len(cum) > 1 else chart_x
+        def py(v_):
+            return chart_y + chart_h * (1 - (v_ - lo) / (hi - lo))
+        pts = [(px(i), py(v)) for i, v in enumerate(cum)]
+        for i in range(1, len(pts)):
+            color = "#16a34a" if cum[i] >= cum[i - 1] else "#dc2626"
+            d.line((pts[i - 1], pts[i]), fill=color, width=4)
+        # 起点终点标注
+        d.ellipse((pts[0][0] - 6, pts[0][1] - 6, pts[0][0] + 6, pts[0][1] + 6), fill="#2563eb")
+        d.ellipse((pts[-1][0] - 6, pts[-1][1] - 6, pts[-1][0] + 6, pts[-1][1] + 6), fill="#2563eb")
+        d.text((pts[-1][0] - 60, pts[-1][1] - 34), f"{cum[-1]:.2f}", font=font_s, fill="#2563eb")
+    else:
+        d.line((pts[0], (chart_x + chart_w, pts[0][1])), fill="#94a3b8", width=3)
+        d.text((chart_x + chart_w // 2 - 70, chart_y + chart_h // 2 - 12), "暂无平仓记录", font=font_n, fill="#94a3b8")
+    y += chart_h + 36
+
+    # 盈亏分布柱状图
+    if trades:
+        d.text((40, y), "每笔盈亏（USDT）", font=font_h1, fill="#1f2937")
+        y += 52
+        bx, by, bw, bh = 70, y, W - 140, 220
+        pnls = [t.get("pnl", 0.0) for t in trades]
+        lo, hi = min(pnls + [0]), max(pnls + [0])
+        if hi == lo:
+            hi, lo = lo + 1, lo - 1
+        zero_y = by + bh * (hi / (hi - lo)) if hi != lo else by + bh // 2
+        d.line((bx, zero_y, bx + bw, zero_y), fill="#94a3b8", width=2)
+        slot = bw / max(len(pnls), 1)
+        for i, v in enumerate(pnls[-20:]):
+            h_ = max(2, bh * abs(v) / (hi - lo))
+            x0 = bx + i * slot + slot * 0.25
+            x1 = x0 + slot * 0.5
+            if v >= 0:
+                d.rectangle((x0, zero_y - h_, x1, zero_y), fill="#16a34a")
+            else:
+                d.rectangle((x0, zero_y, x1, zero_y + h_), fill="#dc2626")
+        d.text((bx, by - 26), f"最高 +{hi:.2f} / 最低 {lo:.2f}", font=font_s, fill="#64748b")
+        y += bh + 36
+
+    # 策略分布
+    by_strategy = stat_by(trades, "strategy")
+    if by_strategy:
+        d.text((40, y), "按策略表现", font=font_h1, fill="#1f2937")
+        y += 50
+        for k, g in list(by_strategy.items())[:6]:
+            label = f"{k}  {g['n']}笔  胜率{g['win_rate']:.0f}%  {g['pnl']:+.2f} USDT"
+            d.text((60, y), label, font=font_n, fill="#334155")
+            y += 40
+
+    # 平仓原因
+    by_reason = stat_by(trades, "reason")
+    if by_reason:
+        reason_cn = {"TP": "止盈", "SL": "止损", "TIMEOUT": "超时强平", "REVERSE": "反向平仓", "LIQ": "爆仓"}
+        d.text((40, y), "平仓原因", font=font_h1, fill="#1f2937")
+        y += 50
+        for k, g in by_reason.items():
+            d.text((60, y), f"{reason_cn.get(k, k)}  {g['n']}笔", font=font_n, fill="#334155")
+            y += 40
+
+    # 当前持仓
+    if state.get("open_positions"):
+        d.text((40, y), "当前持仓", font=font_h1, fill="#1f2937")
+        y += 50
+        for sym, p in state["open_positions"].items():
+            dd = "多" if p.get("direction") == "long" else "空"
+            sl_dist = abs(p.get("entry", 0) - p.get("sl", 0))
+            tp_dist = abs(p.get("tp", 0) - p.get("entry", 0))
+            rrc = tp_dist / sl_dist if sl_dist else 0
+            d.text((60, y), f"{p.get('name', sym)}  {dd}  {p.get('strategy', '')}  @{p.get('entry', 0):.2f}  盈亏比{rrc:.2f}", font=font_n, fill="#334155")
+            y += 40
+
+    d.text((40, H - 56), "⚠️ 模拟单仅作练习记录，不涉及真实资金", font=font_s, fill="#94a3b8")
+    img.save(out_path, "PNG")
+    return out_path
+
 
 def load_state(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
@@ -270,12 +440,36 @@ def send_wecom(webhook: str, content: str) -> bool:
     return True
 
 
+def send_wecom_image(webhook: str, image_path: str) -> bool:
+    """上传图片文件并发送企业微信 file 消息（企微 webhook 上传仅 file 类型稳定可用）"""
+    if not webhook:
+        raise ValueError("未配置报告推送 webhook")
+    key = webhook.split("key=", 1)[-1]
+    up_url = f"https://qyapi.weixin.qq.com/cgi-bin/webhook/upload_media?key={key}&type=file"
+    with open(image_path, "rb") as f:
+        files = {"media": (os.path.basename(image_path), f, "image/png")}
+        r = requests.post(up_url, files=files, timeout=20)
+    r.raise_for_status()
+    up = r.json()
+    if up.get("errcode") != 0:
+        raise RuntimeError(f"企业微信图片上传失败: {up}")
+    media_id = up["media_id"]
+    payload = {"msgtype": "file", "file": {"media_id": media_id}}
+    r = requests.post(webhook, json=payload, timeout=10)
+    r.raise_for_status()
+    data = r.json()
+    if data.get("errcode") != 0:
+        raise RuntimeError(f"企业微信图片推送失败: {data}")
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser(description="模拟盘周报/月报生成器")
     ap.add_argument("--period", choices=["weekly", "monthly", "all"], default="weekly")
     ap.add_argument("--state", default="paper_state.json")
     ap.add_argument("--output", default="")
     ap.add_argument("--push", action="store_true", help="生成后推送到企业微信")
+    ap.add_argument("--image", action="store_true", help="生成图表图片并推送图片消息（需 Pillow）")
     ap.add_argument("--webhook", default="", help="报告推送 webhook URL（优先级最高）")
     args = ap.parse_args()
 
@@ -292,7 +486,13 @@ def main():
         webhook = load_webhook(args.webhook)
         send_wecom(webhook, push_text)
         print("已推送企业微信")
-    elif not args.output:
+    if args.image:
+        webhook = load_webhook(args.webhook)
+        img_path = args.output + ".png" if args.output else f"report_{args.period}.png"
+        build_chart_image(state, trades, args.period, now_str, img_path)
+        send_wecom_image(webhook, img_path)
+        print(f"已生成图表并推送: {img_path}")
+    if not args.output and not args.push and not args.image:
         print(report)
 
 

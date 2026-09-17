@@ -67,9 +67,24 @@ def format_signal(sig, extra: str = "") -> str:
     return "\n".join(lines)
 
 
+def _calc_rr(pos: dict) -> float:
+    """计算盈亏比 = 止盈距离 / 止损距离（按方向取正距离）"""
+    direction = pos.get("direction", "long")
+    if direction == "short":
+        tp_dist = pos["entry"] - pos["tp"]
+        sl_dist = pos["sl"] - pos["entry"]
+    else:
+        tp_dist = pos["tp"] - pos["entry"]
+        sl_dist = pos["entry"] - pos["sl"]
+    if sl_dist <= 0:
+        return 0.0
+    return tp_dist / sl_dist
+
+
 def format_paper_open(pos: dict, balance: float) -> str:
     """模拟开仓消息"""
     dir_cn = "📈 看多 (long)" if pos["direction"] == "long" else "📉 看空 (short)"
+    rr = _calc_rr(pos)
     return "\n".join([
         f"🟢 **模拟开仓 · {pos['name']}**",
         f"> 方向：{dir_cn}",
@@ -78,7 +93,8 @@ def format_paper_open(pos: dict, balance: float) -> str:
         f"> 仓位：${pos['size']:,.0f}（保证金 ${pos.get('margin', 0):.2f} @ {pos.get('leverage', 100)}x）",
         f"> 止损：**{pos['sl']:.2f}**",
         f"> 止盈：**{pos['tp']:.2f}**",
-        f"> 模拟余额：${balance:,.2f}",
+        f"> 盈亏比：**{rr:.2f}**",
+        f"> 模拟余额：**{balance:,.2f} USDT**",
         "> ⚠️ 模拟单仅作练习记录，不涉及真实资金",
     ])
 
@@ -93,7 +109,7 @@ def format_paper_close(kind: str, trade: dict, balance: float) -> str:
         f"> 原因：{kind_cn}（{dir_cn} {trade['strategy']}）",
         f"> 入场 {trade['entry']:.2f} → 出场 **{trade['exit']:.2f}**",
         f"> 盈亏：**{arrow}{trade['pnl']:.2f} USDT**（{arrow}{trade['pnl_pct']:.2f}%）",
-        f"> 模拟余额：${balance:,.2f}",
+        f"> 模拟余额：**{balance:,.2f} USDT**",
     ])
 
 
@@ -101,7 +117,7 @@ def format_paper_status(state: dict) -> str:
     """模拟账户状态（附在信号推送末尾，当存在持仓时）"""
     stats = state["stats"]
     lines = [
-        f"📊 **模拟账户**：余额 ${state['balance']:,.2f}",
+        f"📊 **模拟账户**：余额 **{state['balance']:,.2f} USDT**",
         f"> 累计盈亏：{stats['pnl']:+.2f}（胜 {stats['wins']} / 负 {stats['losses']}）",
     ]
     for sym, pos in state["open_positions"].items():

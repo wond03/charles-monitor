@@ -56,7 +56,7 @@ def format_signal(sig, extra: str = "") -> str:
     if key_lines:
         lines.append(key_lines.rstrip("\n"))
     lines.append(f"> 说明：{sig.detail}")
-    lines.append("> ⚠️ 规则化信号仅作提醒，实盘请人工复核（风控→仓位→心态）")
+    lines.append("> ⚠️ 规则化信号仅作提醒，实盘请人工复核")
     return "\n".join(lines)
 
 

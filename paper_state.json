@@ -1,0 +1,12 @@
+{
+  "balance": 100.0,
+  "initial_balance": 100.0,
+  "peak_equity": 100.0,
+  "open_positions": {},
+  "closed_trades": [],
+  "stats": {
+    "wins": 0,
+    "losses": 0,
+    "pnl": 0.0
+  }
+}

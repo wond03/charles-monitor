@@ -239,6 +239,14 @@ def main():
                                       ckey, age, cool_sec, price_drift)
                             continue
                     cooldown[ckey] = {"ts": now, "price": price}
+                    # 反向持仓但不满足反手条件（策略不在白名单/级别不够）→ 不推送也不开仓
+                    pos = state.get("open_positions", {}).get(key)
+                    if pos and pos["direction"] != sig.direction:
+                        same_or_higher = _level_rank_of(sig) >= _level_rank_of(pos)
+                        struct_confirm = getattr(sig, "strategy", "") in REVERSE_STRATEGIES
+                        if not (same_or_higher and struct_confirm):
+                            log.info("反向不反手，跳过推送: %s %s %s", sig.symbol, sig.strategy, sig.direction)
+                            continue
                     try:
                         send_wecom(webhook, format_signal(sig, extra))
                         log.info("推送信号: %s %s %s %s @%.2f",

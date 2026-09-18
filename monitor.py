@@ -225,7 +225,7 @@ def main():
                           res["vol_surge"], res["price"])
                 for sig, extra, price in res["signals"]:
                     prices[key] = price
-                    ckey = ":".join([sig.symbol, sig.strategy, sig.direction, sig.level])
+                    ckey = ":".join([sig.symbol, sig.strategy, sig.level])
                     now = time.time()
                     rec = cooldown.get(ckey)
                     if rec:

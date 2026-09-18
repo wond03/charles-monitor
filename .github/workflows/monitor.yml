@@ -25,7 +25,18 @@ on:
     - cron: '0 1 * * 1'
     # 每月 1 日 09:00 北京时间(=01:00 UTC)推送模拟盘月报
     - cron: '0 1 1 * *'
-  workflow_dispatch: {}   # 支持手动触发，用于测试
+  workflow_dispatch:
+    # 手动触发：默认只跑扫描；可选推周报/月报（避免同时推两份）
+    inputs:
+      report_type:
+        description: '手动触发时额外推送的报告类型（none/weekly/monthly）'
+        required: false
+        default: 'none'
+        type: choice
+        options:
+          - none
+          - weekly
+          - monthly
   push:
     # 兜底触发：每次向仓库推送代码也跑一次扫描，保证上传文件即能出结果
     branches: [ main, master ]
@@ -73,10 +84,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -90,8 +101,8 @@ jobs:
             sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
           fi
 
-      - name: Push weekly report (Monday 09:00)
-        if: github.event.schedule == '0 1 * * 1' || github.event_name == 'workflow_dispatch'
+      - name: Push weekly report (Monday 09:00 or manual weekly)
+        if: github.event.schedule == '0 1 * * 1' || (github.event_name == 'workflow_dispatch' && github.event.inputs.report_type == 'weekly')
         env:
           # 报告专用 webhook 存在仓库 Secrets 中，key 名为 REPORT_WECOM_WEBHOOK
           REPORT_WECOM_WEBHOOK: ${{ secrets.REPORT_WECOM_WEBHOOK }}

@@ -134,7 +134,8 @@ def format_paper_open(pos: dict, balance: float) -> str:
     return "\n".join([
         f"🟢 **模拟开仓 · {pos['name']}**",
         f"> {ts} ｜ {dir_cn} ｜ {strat}",
-        f"> 入场 **{pos['entry']:.2f}** ｜ 仓位 {pos['size']:,.0f} USDT @{pos.get('leverage', 100)}x",
+        f"> 入场 **{pos['entry']:.2f}** ｜ 入场方式：{pos.get('entry_type') or '市价委托'}",
+        f"> 仓位 {pos['size']:,.0f} USDT（保证金 {pos.get('margin', 0):.2f} USDT @{pos.get('leverage', 100)}x）",
         f"> 止损 **{pos['sl']:.2f}**（{sl_pct:+.2f}%）",
         f"> 止盈 **{pos['tp']:.2f}**（{tp_pct:+.2f}%，{rr:.0f}R）",
         "> ⚠️ 模拟单仅作练习记录",

@@ -97,7 +97,9 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
     leverage = int(cfg.get("leverage", 100) or 1)
     fee_taker = float(cfg.get("fee_taker", 0.0008) or 0.0008)
     cost = float(cfg.get("cost_per_trade_usdt", 5) or 5)  # 每次开仓固定成本 = 保证金 + 手续费
-    sl_default, tp_default = _sl_tp(sig.price, sig.direction, cfg["sl_pct"], cfg["tp_rr"])
+    liq_dist = 100.0 / max(int(cfg.get("leverage", 100) or 1), 1)  # 爆仓线距离%
+    sl_pct_eff = min(float(cfg.get("sl_pct", 1.0) or 1.0), liq_dist * 0.95)  # 固定止损放宽1%但须在爆仓线内留5%余量(100x→0.95%)
+    sl_default, tp_default = _sl_tp(sig.price, sig.direction, sl_pct_eff, cfg["tp_rr"])
     sl, tp = sl_default, tp_default
     detail = sig.detail
     use_struct = bool(cfg.get("use_structure_sl_tp", True))
@@ -217,18 +219,18 @@ def close_position(state: dict, sym: str, price: float, reason: str, realized_pn
 
 def _maybe_breakeven(pos: dict, price: float, cfg: dict) -> None:
     """保本保护（手册 4.3 + 用户确认口径）：
-    - 浮盈 >= 下单成本 × breakeven_cost_mult（默认3倍 = 5U×3 = 15U）→ 止损移到入场价（保本）
+    - 浮盈 >= 单笔风险 × breakeven_r（默认 3R；R=该单止损距离对应风险金额）→ 止损移到入场价（保本）
     """
-    trade_cost = float(pos.get("trade_cost", 0) or 0)
-    if trade_cost <= 0:
+    risk = float(pos.get("risk", 0) or 0)
+    if risk <= 0:
         return
     pnl = mark_price(pos, price)
-    mult = float(cfg.get("breakeven_cost_mult", 3.0) or 3.0)
-    if not pos.get("breakeven_applied") and pnl >= trade_cost * mult:
+    r_mult = float(cfg.get("breakeven_r", 3.0) or 3.0)
+    if not pos.get("breakeven_applied") and pnl >= risk * r_mult:
         pos["sl"] = pos["entry"]
         pos["breakeven_applied"] = True
-        log.info("保本上移: %s %s 浮盈 %.2f >= 成本%.2f×%.1f=%.2f，止损移至入场价 %.2f",
-                 pos["name"], pos["direction"], pnl, trade_cost, mult, trade_cost * mult, pos["entry"])
+        log.info("保本上移: %s %s 浮盈 %.2f >= 风险%.2f×%.1f=%.2f，止损移至入场价 %.2f",
+                 pos["name"], pos["direction"], pnl, risk, r_mult, risk * r_mult, pos["entry"])
 
 
 def manage_positions(state: dict, ctxs: dict, cfg: dict) -> list:

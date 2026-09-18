@@ -37,7 +37,7 @@ import paper_trader
 # 可触发严谨反手的结构确认类策略（手册 4.5 换边规则）
 REVERSE_STRATEGIES = ("模板", "保底", "BOS", "MSS", "归汤")
 # 级别权重：数值越大级别越高（反手要求反向信号级别 >= 持仓级别）
-LEVEL_RANK = {"15M": 1, "1H": 2, "4H+15M": 3, "1H+15M": 3, "4H": 4}
+LEVEL_RANK = {"15M": 1, "1H": 2, "4H+15M": 3, "1H+15M": 3, "4H": 4, "4H+1H+5M": 5}
 
 
 def _level_rank_of(sig_or_pos) -> int:

@@ -33,12 +33,16 @@ engine:
   h1_lookback: 120            # 1H 级别参与计算的K线根数
   m15_lookback: 120           # 15M 级别参与计算的K线根数
   h4_lookback: 120            # 4H 级别参与计算的K线根数
+  m5_lookback: 240            # 5M 级别参与计算的K线根数（模板确认层）
   pivot_radius_h1: 3          # 1H swing 高/低点判断半径(左右各几根)
   pivot_radius_m15: 5         # 15M swing 半径
+  pivot_radius_m5: 5          # 5M swing 半径（模板5M确认层）
   level_cluster_pct: 0.15     # 关键水平聚类容差(%)
+  level_min_touch: 2          # 关键位最小触及次数：手册"两点成线禁虚空"，1=不过滤(旧行为)，2=单次触及不成线
   fvg_min_pct: 0.05           # FVG缺口最小幅度(%)
   trend_ma: 50                # 趋势判断均线周期(1H)
   vol_surge_mult: 2.5         # 出量判定：当前成交量 / 近20根均量 超过该倍数视为出量
+  push_structure_signals: true  # true=结构标记(BOS/MSS/CHoCH)保留独立推送（现状）；false=仅作结构标记不推送不开单
 
 # 模拟交易（信号命中自动开模拟单，不涉及真实资金）
 # 参数含义：
@@ -47,10 +51,10 @@ engine:
 #   leverage: 100            # 杠杆倍数（100x：价格反向波动1%即爆仓）
 #   risk_per_trade_pct: 1.0  # 每笔风险占余额%(对应手册：单笔风控1%)
 #   use_structure_sl_tp: true# 按手册条件判定止盈止损：止损=结构位、止盈=目标位/出量/趋势转换；false 时回退固定百分比
-#   breakeven_cost_mult: 3.0 # 保本保护：浮盈达下单成本 N 倍（5U×3=15U）→ 止损移到入场价（用户确认口径）
-#   sl_pct: 0.8              # 兜底止损距离%(入场价上下)；100x杠杆爆仓线1%，止损必须<1%
-#   tp_rr: 5.0               # 兜底止盈 = 止损距离 × 该倍数（0.8%×5=4%；用户确认止盈=5R）
-#   max_hold_hours: 24       # 最长持仓时间，超时按市价强平
+#   breakeven_r: 3.0         # 保本保护：浮盈达单笔风险(止损距离金额)的 3R → 止损移到入场价（用户确认口径）
+#   sl_pct: 1.0              # 兜底止损距离%(入场价上下)；100x杠杆爆仓线1%，留5%余量 → 实际生效0.95%
+#   tp_rr: 5.0               # 兜底止盈 = 止损距离 × 该倍数（0.95%×5=4.75%；用户确认止盈=5R）
+#   max_hold_hours: 48       # 最长持仓时间，超时按市价强平
 #   min_size_usdt: 5         # 最小下单量：名义仓位低于该值(USDT)跳过开仓（Weex 最小单量）
 #   fee_taker: 0.0008        # 开/平仓手续费率（Weex 市价单 Taker 0.08%）
 #   fee_maker: 0.0002        # Maker 费率（0.02%，模拟盘市价触发暂不使用）
@@ -62,13 +66,14 @@ paper_trading:
   cost_per_trade_usdt: 5
   risk_per_trade_pct: 1.0
   use_structure_sl_tp: true
-  breakeven_cost_mult: 3.0
-  sl_pct: 0.8
+  breakeven_r: 3.0           # 保本：浮盈达单笔风险(止损距离金额)的 3R 时，止损上移至入场价
+  sl_pct: 1.0                # 固定止损 1%（100x 爆仓线 1%，留 5% 余量 → 实际生效 0.95%）
   tp_rr: 5.0
-  max_hold_hours: 24
+  max_hold_hours: 48
   min_size_usdt: 5
   fee_taker: 0.0008
   fee_maker: 0.0002
+  halt_after_consecutive_losses: 5  # 风控熔断：一天内连续止损(含爆仓)达到该笔数 → 当日停止开仓与推送并通报，次日自动恢复；0 表示关闭
   state_file: "paper_state.json"
 
 # 扫描与推送（日内交易模式）

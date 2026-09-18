@@ -10,9 +10,10 @@ import yaml
 
 log = logging.getLogger(__name__)
 
-# 统一使用北京时间
+# 统一使用北京时间（GitHub runner 默认 UTC，tzset 在部分环境不生效，改用显式偏移）
 os.environ.setdefault("TZ", "Asia/Shanghai")
 time.tzset()
+BJ_TZ = 8 * 3600
 
 TIMEOUT = 10
 
@@ -62,7 +63,7 @@ def format_signal(sig, extra: str = "") -> str:
     if sig.key_levels:
         kls = " / ".join(f"**{k:.2f}**" for k in sig.key_levels[:4])
         key_lines = f"> 关键位：{kls}\n"
-    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() + BJ_TZ))
     lines = [
         f"**{sig.symbol} {dir_cn}**",
         f"> 信号时间：{ts}（北京时间）",
@@ -116,7 +117,7 @@ def format_paper_open(pos: dict, balance: float) -> str:
     dir_cn = "📈 看多 (long)" if pos["direction"] == "long" else "📉 看空 (short)"
     return "\n".join([
         f"🟢 **模拟开仓 · {pos['name']}**",
-        f"> 开仓时间：{pos.get('open_time') or time.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）",
+        f"> 开仓时间：{pos.get('open_time') or time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + BJ_TZ))}（北京时间）",
         f"> 方向：{dir_cn}",
         f"> 策略：{pos['strategy']}（{pos['level']}）",
         f"> 入场方式：{pos.get('entry_type') or '市价委托'}",
@@ -137,7 +138,7 @@ def format_paper_close(kind: str, trade: dict, balance: float) -> str:
     duration = _fmt_duration(trade.get("exit_ts", 0) - trade.get("open_ts", trade.get("exit_ts", 0)))
     return "\n".join([
         f"🔴 **模拟平仓 · {trade['name']}**",
-        f"> 平仓时间：{trade.get('exit_time') or time.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）",
+        f"> 平仓时间：{trade.get('exit_time') or time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + BJ_TZ))}（北京时间）",
         f"> 原因：{kind_cn}（{dir_cn} {trade['strategy']}）",
         f"> 持仓时长：{duration}",
         f"> 入场 {trade['entry']:.2f} → 出场 **{trade['exit']:.2f}**",
@@ -149,7 +150,7 @@ def format_paper_close(kind: str, trade: dict, balance: float) -> str:
 def format_paper_status(state: dict) -> str:
     """模拟账户状态（附在信号推送末尾，当存在持仓时）"""
     stats = state["stats"]
-    now_str = time.strftime("%Y-%m-%d %H:%M:%S")
+    now_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() + BJ_TZ))
     lines = [
         f"📊 **模拟账户**（{now_str} 北京时间）：余额 **{state['balance']:,.2f} USDT**",
         f"> 累计盈亏：{stats['pnl']:+.2f}（胜 {stats['wins']} / 负 {stats['losses']}）",

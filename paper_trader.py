@@ -22,9 +22,10 @@ import time
 
 log = logging.getLogger(__name__)
 
-# 统一使用北京时间（GitHub runner 默认 UTC）
+# 统一使用北京时间（GitHub runner 默认 UTC，tzset 在部分环境不生效，改用显式偏移）
 os.environ.setdefault("TZ", "Asia/Shanghai")
 time.tzset()
+BJ_TZ = 8 * 3600
 
 DEFAULT_STATE = {
     "balance": 100.0,            # 当前余额(USDT)
@@ -148,7 +149,7 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
         "fee_taker": fee_taker,
         "fee_open": round(fee_open, 4),
         "open_ts": now,
-        "open_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)),
+        "open_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now + BJ_TZ)),
         "entry_type": getattr(sig, "entry_type", "") or "市价委托",
         "detail": detail,
     }
@@ -203,7 +204,7 @@ def close_position(state: dict, sym: str, price: float, reason: str, realized_pn
         **pos,
         "exit": round(price, 2),
         "exit_ts": now,
-        "exit_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)),
+        "exit_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now + BJ_TZ)),
         "fee_close": round(fee_close, 4),
         "fee_total": round(fee_open + fee_close, 4),
         "pnl": round(pnl, 2),

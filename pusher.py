@@ -113,37 +113,39 @@ def _fmt_duration(seconds: float) -> str:
 
 
 def format_paper_open(pos: dict, balance: float) -> str:
-    """模拟开仓消息"""
+    """模拟开仓消息（方案B：表格紧凑，止损/止盈带百分比与盈亏比）"""
     dir_cn = "📈 看多 (long)" if pos["direction"] == "long" else "📉 看空 (short)"
+    sl_pct = (pos["sl"] - pos["entry"]) / pos["entry"] * 100
+    tp_pct = (pos["tp"] - pos["entry"]) / pos["entry"] * 100
+    rr = _calc_rr(pos)
+    ts = pos.get('open_time') or time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + BJ_TZ))
     return "\n".join([
         f"🟢 **模拟开仓 · {pos['name']}**",
-        f"> 开仓时间：{pos.get('open_time') or time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + BJ_TZ))}（北京时间）",
-        f"> 方向：{dir_cn}",
-        f"> 策略：{pos['strategy']}（{pos['level']}）",
-        f"> 入场方式：{pos.get('entry_type') or '市价委托'}",
-        f"> 入场：**{pos['entry']:.2f}**",
-        f"> 仓位：{pos['size']:,.0f} USDT（保证金 {pos.get('margin', 0):.2f} USDT @ {pos.get('leverage', 100)}x）",
-        f"> 止损：**{pos['sl']:.2f}**",
-        f"> 止盈：**{pos['tp']:.2f}**",
+        f"> 时间：{ts} ｜ 方向：{dir_cn}",
+        f"> 策略：{pos['strategy']}（{pos['level']}） ｜ 入场：{pos.get('entry_type') or '市价委托'}",
+        f"> 入场 **{pos['entry']:.2f}** ｜ 仓位 **{pos['size']:,.0f} USDT**（{pos.get('margin', 0):.2f} USDT @ {pos.get('leverage', 100)}x）",
+        f"> 止损 **{pos['sl']:.2f}**（{sl_pct:+.2f}%）｜ 止盈 **{pos['tp']:.2f}**（{tp_pct:+.2f}%，{rr:.0f}R）",
         "> ⚠️ 模拟单仅作练习记录，不涉及真实资金",
     ])
 
 
 def format_paper_close(kind: str, trade: dict, balance: float) -> str:
-    """模拟平仓消息。kind: TP/SL/TIMEOUT/REVERSE"""
+    """模拟平仓消息（方案B：表格紧凑，盈亏带 R 倍数）。kind: TP/SL/TIMEOUT/REVERSE"""
     kind_cn = {"TP": "止盈", "SL": "止损", "TIMEOUT": "超时强平", "REVERSE": "反向平仓", "LIQ": "爆仓",
                "VOL_TP": "出量止盈", "TREND_EXIT": "趋势转换出场"}.get(kind, kind)
     dir_cn = "📈 多单" if trade["direction"] == "long" else "📉 空单"
     arrow = "+" if trade["pnl"] >= 0 else ""
     duration = _fmt_duration(trade.get("exit_ts", 0) - trade.get("open_ts", trade.get("exit_ts", 0)))
+    risk = float(trade.get("risk", 0) or 0)
+    r_str = f"，{trade['pnl'] / risk:+.1f}R" if risk > 0 else ""
+    ts = trade.get('exit_time') or time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + BJ_TZ))
     return "\n".join([
         f"🔴 **模拟平仓 · {trade['name']}**",
-        f"> 平仓时间：{trade.get('exit_time') or time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + BJ_TZ))}（北京时间）",
-        f"> 原因：{kind_cn}（{dir_cn} {trade['strategy']}）",
+        f"> 时间：{ts} ｜ 原因：{kind_cn}（{dir_cn} {trade['strategy']}）",
         f"> 持仓时长：{duration}",
         f"> 入场 {trade['entry']:.2f} → 出场 **{trade['exit']:.2f}**",
-        f"> 盈亏：**{arrow}{trade['pnl']:.2f} USDT**（{arrow}{trade['pnl_pct']:.2f}%）",
-        f"> 模拟余额：**{balance:,.2f} USDT**",
+        f"> 盈亏：**{arrow}{trade['pnl']:.2f} USDT**（{arrow}{trade['pnl_pct']:.2f}%{r_str}）",
+        f"> 余额：**{balance:,.2f} USDT**",
     ])
 
 

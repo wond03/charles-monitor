@@ -1,30 +1,8 @@
 {
-  "balance": 99.7,
+  "balance": 104.05,
   "initial_balance": 100.0,
-  "peak_equity": 100.47,
+  "peak_equity": 104.05,
   "open_positions": {
-    "btc": {
-      "symbol": "btc",
-      "name": "BTC永续",
-      "direction": "long",
-      "strategy": "归汤",
-      "level": "1H",
-      "entry": 76617.6,
-      "sl": 75903.52,
-      "tp": 78759.84,
-      "initial_sl": 75903.52,
-      "sl_protected": false,
-      "size": 107.47,
-      "margin": 1.0747,
-      "leverage": 100,
-      "risk": 1.0,
-      "fee_taker": 0.0008,
-      "fee_open": 0.086,
-      "open_ts": 1789674812,
-      "open_time": "2026-09-18 03:53:32",
-      "entry_type": "市价委托",
-      "detail": "影线下穿关键位 76530.00 后收回，疑似假突破；0.5回踩位加持(76551.35)；止损=结构位，止盈=目标位（手册条件判定）"
-    },
     "gold": {
       "symbol": "gold",
       "name": "黄金永续(XAU)",
@@ -314,11 +292,41 @@
       "pnl": -0.25,
       "pnl_pct": -15.137,
       "reason": "反向平仓"
+    },
+    {
+      "symbol": "btc",
+      "name": "BTC永续",
+      "direction": "long",
+      "strategy": "归汤",
+      "level": "1H",
+      "entry": 76617.6,
+      "sl": 75903.52,
+      "tp": 78759.84,
+      "initial_sl": 75903.52,
+      "sl_protected": false,
+      "size": 107.47,
+      "margin": 1.0747,
+      "leverage": 100,
+      "risk": 1.0,
+      "fee_taker": 0.0008,
+      "fee_open": 0.086,
+      "open_ts": 1789674812,
+      "open_time": "2026-09-18 03:53:32",
+      "entry_type": "市价委托",
+      "detail": "影线下穿关键位 76530.00 后收回，疑似假突破；0.5回踩位加持(76551.35)；止损=结构位，止盈=目标位（手册条件判定）",
+      "exit": 79841.7,
+      "exit_ts": 1789739348,
+      "exit_time": "2026-09-18 21:49:08",
+      "fee_close": 0.0896,
+      "fee_total": 0.1756,
+      "pnl": 4.35,
+      "pnl_pct": 420.804,
+      "reason": "止盈"
     }
   ],
   "stats": {
-    "wins": 7,
+    "wins": 8,
     "losses": 4,
-    "pnl": 0.16
+    "pnl": 4.05
   }
 }

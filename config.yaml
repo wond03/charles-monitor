@@ -39,6 +39,7 @@ engine:
   fvg_min_pct: 0.05           # FVG缺口最小幅度(%)
   trend_ma: 50                # 趋势判断均线周期(1H)
   vol_surge_mult: 2.5         # 出量判定：当前成交量 / 近20根均量 超过该倍数视为出量
+  push_structure_signals: true  # true=结构标记(BOS/MSS/CHoCH)保留独立推送（现状）；false=仅作结构标记不推送不开单
 
 # 模拟交易（信号命中自动开模拟单，不涉及真实资金）
 # 参数含义：

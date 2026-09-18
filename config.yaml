@@ -73,6 +73,7 @@ paper_trading:
   min_size_usdt: 5
   fee_taker: 0.0008
   fee_maker: 0.0002
+  halt_after_consecutive_losses: 5  # 风控熔断：一天内连续止损(含爆仓)达到该笔数 → 当日停止开仓与推送并通报，次日自动恢复；0 表示关闭
   state_file: "paper_state.json"
 
 # 扫描与推送（日内交易模式）

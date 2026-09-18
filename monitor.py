@@ -130,6 +130,49 @@ def save_cooldown(cooldown: dict, path: str) -> None:
         log.warning("冷却状态保存失败: %s", e)
 
 
+# ---------- 风控熔断：一天内连续止损达到阈值 → 停止开仓与推送并通报 ----------
+BJ_TZ = 8 * 3600
+LOSS_REASONS = ("止损", "爆仓")
+
+
+def _today_bj() -> str:
+    return time.strftime("%Y-%m-%d", time.localtime(time.time() + BJ_TZ))
+
+
+def _consecutive_losses(state: dict) -> int:
+    """从最近一笔平仓往前数连续亏损(止损/爆仓)单数；遇到非亏损平仓即重置"""
+    n = 0
+    for t in reversed(state.get("closed_trades", [])):
+        if t.get("reason") in LOSS_REASONS:
+            n += 1
+        else:
+            break
+    return n
+
+
+def _is_halted(state: dict) -> bool:
+    h = state.get("halt")
+    return bool(h and h.get("date") == _today_bj())
+
+
+def _check_halt(state: dict, paper_cfg: dict, webhook: str) -> None:
+    """连续止损达阈值 → 置 halt（当日熔断）并通报；已熔断或未达阈值则不动"""
+    threshold = int(paper_cfg.get("halt_after_consecutive_losses", 0) or 0)
+    if threshold <= 0 or _is_halted(state):
+        return
+    losses = _consecutive_losses(state)
+    if losses < threshold:
+        return
+    state["halt"] = {"date": _today_bj(), "losses": losses, "ts": time.time()}
+    try:
+        send_wecom(webhook,
+                   f"## ⛔ 风控熔断\n连续亏损 **{losses}** 单（止损/爆仓），"
+                   f"今日已暂停开仓与信号推送，明日自动恢复。")
+        log.warning("风控熔断: 连续亏损 %d 单，今日暂停开仓与推送", losses)
+    except Exception as e:  # noqa: BLE001
+        log.error("熔断通报发送失败: %s", e)
+
+
 def _paper_on_signal(state: dict, sym_key: str, sig, paper_cfg: dict, webhook: str) -> None:
     """信号命中后的模拟单处理（对应手册 4.5 换边规则）：
     - 无持仓：直接开新仓
@@ -226,6 +269,11 @@ def main():
                           res["vol_surge"], res["price"])
                 for sig, extra, price in res["signals"]:
                     prices[key] = price
+                    # 风控熔断：当日连续亏损达阈值 → 停止开仓与推送
+                    if paper_on and _is_halted(state):
+                        log.info("风控熔断中，跳过推送与开仓: %s %s %s",
+                                 sig.symbol, sig.strategy, sig.direction)
+                        continue
                     ckey = ":".join([sig.symbol, sig.strategy, sig.level])
                     now = time.time()
                     rec = cooldown.get(ckey)
@@ -265,6 +313,8 @@ def main():
                         log.info("模拟平仓: %s %s %s (%s)", trade["name"], kind, trade["pnl"], trade["reason"])
                     except Exception as e:  # noqa: BLE001
                         log.error("平仓推送失败: %s", e, exc_info=True)
+                # 风控熔断检查：连续止损达阈值则当日停止开仓与推送并通报
+                _check_halt(state, paper_cfg, webhook)
                 paper_trader.save_state(state, state_file)
                 save_cooldown(cooldown, cooldown_file)
                 commit_paper_state(state_file, extra_files=[cooldown_file])

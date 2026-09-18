@@ -40,9 +40,17 @@ def send_wecom(webhook: str, content: str, msgtype: str = "markdown") -> bool:
     return True
 
 
-def send_test(webhook: str) -> None:
-    """发送测试消息"""
-    send_wecom(webhook, "✅ 查尔斯信号监控系统已启动！\n> 监控标的：BTC / 黄金(PAXG)\n> 策略：保底 / 归汤 / 模板\n> 信号命中后将实时推送提醒")
+def send_test(webhook: str, config_path: str = "config.yaml") -> None:
+    """发送测试消息（标的从 config.yaml 动态读取）"""
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+        names = " / ".join(v["name"] for v in cfg.get("symbols", {}).values() if v.get("enabled"))
+        if not names:
+            names = "未配置标的"
+    except Exception:
+        names = "BTC / 黄金"
+    send_wecom(webhook, f"✅ 查尔斯信号监控系统已启动！\n> 监控标的：{names}\n> 策略：保底（1H结构+15M MSS+FVG+0.5回踩，目标1:5）\n> 归汤（假突破+转势确认） / 模板（4H趋势+15M转势共振）\n> 信号命中后将实时推送提醒")
 
 
 def format_signal(sig, extra: str = "") -> str:

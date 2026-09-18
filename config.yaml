@@ -10,7 +10,7 @@ wecom_webhook: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=97206f79-89
 
 # 模拟盘周报/月报推送 webhook（可选）
 # paper_report.py --push 时使用；也可用环境变量 REPORT_WECOM_WEBHOOK 传入，优先级更高
-report_wecom_webhook: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=35b0f962-986d-49a1-a3b3-6609dfa85aa6"
+report_wecom_webhook: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=38b35cdc-bfc5-435d-a153-2be82e951112"
 
 # 监控标的（true/false 控制开关）
 symbols:

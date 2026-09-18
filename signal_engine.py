@@ -76,8 +76,11 @@ def detect_swings(kl: List[Kline], radius: int = 3):
     return swings
 
 
-def key_levels(kl: List[Kline], radius: int = 3, cluster_pct: float = 0.15) -> List[dict]:
-    """swing 价格聚类为关键水平。返回 [{price, kind, count}, ...] 按最近优先"""
+def key_levels(kl: List[Kline], radius: int = 3, cluster_pct: float = 0.15,
+               min_touch: int = 1) -> List[dict]:
+    """swing 价格聚类为关键水平。返回 [{price, kind, count}, ...] 按最近优先。
+    min_touch>=2 时过滤虚空单点（手册：两点成线禁止虚空，单次触及不算有效结构）。
+    """
     swings = detect_swings(kl, radius)
     if not swings:
         return []
@@ -95,6 +98,8 @@ def key_levels(kl: List[Kline], radius: int = 3, cluster_pct: float = 0.15) -> L
                 break
         if not placed:
             levels.append({"price": price, "kind": kind, "ts": kl[idx].ts, "count": 1})
+    if min_touch > 1:
+        levels = [lv for lv in levels if lv["count"] >= min_touch]
     levels.sort(key=lambda x: -x["ts"])
     return levels[:10]
 
@@ -403,11 +408,12 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
     radius_h1 = cfg.get("pivot_radius_h1", 3)
     radius_m15 = cfg.get("pivot_radius_m15", 5)
     cluster = cfg.get("level_cluster_pct", 0.15)
+    min_touch = cfg.get("level_min_touch", 1)  # 关键位最小触及次数（手册两点成线禁虚空，>=2 过滤单点）
     fvg_min = cfg.get("fvg_min_pct", 0.05)
 
     # --- 1H 级别信号 ---
     h1_trend = trend_by_ma(klines_h1, h1_ma)
-    h1_levels = key_levels(klines_h1, radius_h1, cluster)
+    h1_levels = key_levels(klines_h1, radius_h1, cluster, min_touch)
     push_struct = cfg.get("push_structure_signals", True)  # true=结构标记(BOS/MSS/CHoCH)保留推送；false=仅作结构标记不推送
     # 0.5 回踩位附加确认（对应手册 3.1）：不单独推送，结构信号命中且价格恰在 0.5 位附近时标注加分
     fib_05_note = {d: retrace_05_note(klines_h1, d, radius_h1) for d in ("long", "short")}
@@ -445,7 +451,7 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
         out.append(s_fake)
 
     # --- 保底策略组合（对齐手册：1H 数结构 + 15M 转势确认 + FVG 硬性） ---
-    m15_levels = key_levels(klines_m15, radius_m15, cluster)
+    m15_levels = key_levels(klines_m15, radius_m15, cluster, min_touch)
     m15_fvg = last_fvg(klines_m15, 8, fvg_min)
 
     h1_mss = detect_mss(klines_h1, radius_h1)
@@ -490,32 +496,35 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
             s2.tp_price = tp_from_rr(s.price, sl, "short", 5.0)
             out.append(s2)
 
-    # --- 模板策略：4H 趋势 + 15M 共振（P2 简化保留两层近似，未补半分/双点） ---
+    # --- 模板策略（对齐手册 3.3：4H 定趋势 → 向下推一级到 1H 找结构 → 5M 看转势） ---
+    # 数据源暂缺 5M，确认层以 1H 结构（MSS/CHoCH/BOS）共振近似；4H 上一级是日线非周线
     h4_trend = trend_by_ma(klines_h4, min(h1_ma * 2, 60)) if len(klines_h4) > 20 else "flat"
-    for s in (s_m15_mss, s_m15_bos):
+    for s in (h1_mss, h1_choch, s_bos):
         if not s:
             continue
         if h4_trend == "up" and s.direction == "long":
-            sl15 = struct_sl_from_swings(klines_m15, "long", radius_m15)
-            s2 = Signal(symbol=symbol, direction="long", strategy="模板", level="4H+15M",
-                        price=s.price, key_levels=s.key_levels,
-                        detail=f"4H趋势向上 + 15M {s.strategy}共振；"
+            sl1 = struct_sl_from_swings(klines_h1, "long", radius_h1)
+            s2 = Signal(symbol=symbol, direction="long", strategy="模板", level="4H+1H",
+                        price=s.price, key_levels=h1_levels,
+                        detail=f"4H趋势向上 + 1H {s.strategy}结构共振；"
                                f"大级别定趋势、小级别找共振；极小止损抓大结构"
+                               f"（5M确认层待数据源支持）"
                                f"{fib_05_note.get('long', '')}",
                         entry_type="追踪委托", priority=1)
-            s2.sl_price = sl15
-            s2.tp_price = tp_from_rr(s.price, sl15, "long", 5.0)
+            s2.sl_price = sl1
+            s2.tp_price = tp_from_rr(s.price, sl1, "long", 5.0)
             out.append(s2)
         elif h4_trend == "down" and s.direction == "short":
-            sl15 = struct_sl_from_swings(klines_m15, "short", radius_m15)
-            s2 = Signal(symbol=symbol, direction="short", strategy="模板", level="4H+15M",
-                        price=s.price, key_levels=s.key_levels,
-                        detail=f"4H趋势向下 + 15M {s.strategy}共振；"
+            sl1 = struct_sl_from_swings(klines_h1, "short", radius_h1)
+            s2 = Signal(symbol=symbol, direction="short", strategy="模板", level="4H+1H",
+                        price=s.price, key_levels=h1_levels,
+                        detail=f"4H趋势向下 + 1H {s.strategy}结构共振；"
                                f"大级别定趋势、小级别找共振；极小止损抓大结构"
+                               f"（5M确认层待数据源支持）"
                                f"{fib_05_note.get('short', '')}",
                         entry_type="追踪委托", priority=1)
-            s2.sl_price = sl15
-            s2.tp_price = tp_from_rr(s.price, sl15, "short", 5.0)
+            s2.sl_price = sl1
+            s2.tp_price = tp_from_rr(s.price, sl1, "short", 5.0)
             out.append(s2)
 
     # 附：1H 趋势状态（不推送，供日志）

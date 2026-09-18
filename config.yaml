@@ -36,6 +36,7 @@ engine:
   pivot_radius_h1: 3          # 1H swing 高/低点判断半径(左右各几根)
   pivot_radius_m15: 5         # 15M swing 半径
   level_cluster_pct: 0.15     # 关键水平聚类容差(%)
+  level_min_touch: 2          # 关键位最小触及次数：手册"两点成线禁虚空"，1=不过滤(旧行为)，2=单次触及不成线
   fvg_min_pct: 0.05           # FVG缺口最小幅度(%)
   trend_ma: 50                # 趋势判断均线周期(1H)
   vol_surge_mult: 2.5         # 出量判定：当前成交量 / 近20根均量 超过该倍数视为出量

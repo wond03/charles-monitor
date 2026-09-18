@@ -59,9 +59,9 @@ jobs:
         run: |
           git config user.name "charles-monitor-bot"
           git config user.email "actions@users.noreply.github.com"
-          mkdir -p logs
-          echo "last_scan: $(date -u +%Y-%m-%dT%H:%M:%SZ)" > logs/last_scan.txt
-          git add logs/last_scan.txt
+          mkdir -p .github
+          echo "last_scan: $(date -u +%Y-%m-%dT%H:%M:%SZ)" > .github/last_scan.txt
+          git add .github/last_scan.txt
           if git diff --cached --quiet; then
             echo "last_scan.txt unchanged, skip push"
           else

@@ -97,8 +97,8 @@ jobs:
           REPORT_WECOM_WEBHOOK: ${{ secrets.REPORT_WECOM_WEBHOOK }}
         run: python paper_report.py --period weekly --state paper_state.json --pdf
 
-      - name: Push monthly report (1st 09:00)
-        if: github.event.schedule == '0 1 1 * *' || github.event_name == 'workflow_dispatch'
+      - name: Push monthly report (1st 09:00 or manual monthly)
+        if: github.event.schedule == '0 1 1 * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.report_type == 'monthly')
         env:
           REPORT_WECOM_WEBHOOK: ${{ secrets.REPORT_WECOM_WEBHOOK }}
         run: python paper_report.py --period monthly --state paper_state.json --pdf

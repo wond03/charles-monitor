@@ -38,6 +38,7 @@ def _gate_futures_klines(inst: str, interval: str, limit: int) -> list:
             "high": float(row["h"]),
             "low": float(row["l"]),
             "close": float(row["c"]),
+            "volume": float(row.get("v") or 0),
         })
     return sorted(out, key=lambda x: x["ts"])
 
@@ -54,10 +55,11 @@ def _gate_klines(inst: str, interval: str, limit: int) -> list:
     for row in rows:
         out.append({
             "ts": int(row[0]),
-            "open": float(row[6]),
+            "open": float(row[5]),
             "high": float(row[3]),
             "low": float(row[4]),
             "close": float(row[2]),
+            "volume": float(row[6] or 0),
         })
     return sorted(out, key=lambda x: x["ts"])
 
@@ -139,6 +141,7 @@ def _weex_klines(inst: str, interval: str, limit: int) -> list:
             "high": float(row[2]),
             "low": float(row[3]),
             "close": float(row[4]),
+            "volume": float(row[5] or 0),
         })
     return sorted(out, key=lambda x: x["ts"])
 

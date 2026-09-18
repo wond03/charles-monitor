@@ -7,10 +7,10 @@
   - 每笔风险 = 账户余额 × risk_per_trade_pct（默认 1%）
   - 杠杆 = leverage（默认 100x），保证金 = 名义仓位 / 杠杆
   - 爆仓：价格反向波动达到 100/杠杆 % 时亏光保证金强平（100x → 1%）
-  - 止损 = 入场价 ± sl_pct（默认 0.8%，须小于爆仓线 1%）
-  - 止盈 = 入场价 ± sl_pct × tp_rr（默认 0.8% × 2 = 1.6%）
-  - 反向信号 → 平旧仓并反手开新仓
-  - 超时未平 → 按市价强平（默认 24h，日内交易模式）
+  - 止损 = 入场价 ± sl_pct（默认 1.0%，实际取 min(sl_pct, 爆仓线×0.95)，100x 下封顶 0.95%）
+  - 止盈 = 入场价 ± 止损距离 × tp_rr（默认 5R；无结构目标位时兜底 = 0.95% × 5 = 4.75%）
+  - 反向信号 → 平旧仓并反手开新仓（须级别/策略满足反手条件）
+  - 超时未平 → 按市价强平（默认 48h，日内交易模式）
 
 状态持久化：paper_state.json（本地部署写本地文件；GitHub Actions 运行结束后
 由 monitor.py 提交回仓库，保证云端状态不丢）。
@@ -63,14 +63,6 @@ def _sl_tp(entry: float, direction: str, sl_pct: float, tp_rr: float):
     return sl, tp
 
 
-def _size(entry: float, sl: float, risk_usdt: float) -> float:
-    """按止损距离计算名义仓位(USDT)，使止损亏损≈风险额"""
-    dist = abs(entry - sl) / entry
-    if dist <= 0:
-        return 0.0
-    return risk_usdt / dist
-
-
 def _size_by_cost(cost_usdt: float, leverage: int, fee_taker: float) -> float:
     """按固定开仓成本(USDT)计算名义仓位：
     成本 = 保证金 + 手续费 = size/leverage + size*fee_taker
@@ -107,13 +99,12 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
         s_sl = getattr(sig, "sl_price", None)
         s_tp = getattr(sig, "tp_price", None)
         if s_sl and s_tp:
-            liq_dist = 100.0 / max(int(cfg.get("leverage", 100) or 1), 1)
             dist_pct = abs(sig.price - s_sl) / sig.price * 100
             if dist_pct <= liq_dist * 0.95:  # 结构止损须在爆仓线内留余量
                 sl, tp = s_sl, s_tp
                 detail = (detail or "") + "；止损=结构位，止盈=目标位（手册条件判定）"
             else:
-                detail = (detail or "") + f"；结构止损过宽({dist_pct:.2f}%)，回退固定止损{cfg['sl_pct']}%"
+                detail = (detail or "") + f"；结构止损过宽({dist_pct:.2f}%)，回退固定止损{sl_pct_eff}%"
     size = _size_by_cost(cost, leverage, fee_taker)
     if size <= 0:
         return None
@@ -140,8 +131,6 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
         "sl": round(sl, 2),
         "tp": round(tp, 2),
         "initial_sl": round(sl, 2),   # 初始止损位（保本上移的基准）
-        "sl_protected": False,         # 是否已上移保本
-        "trade_cost": round(cost, 2),  # 下单成本 = 保证金 + 手续费（保本触发基准）
         "breakeven_applied": False,    # 是否已成本上保
         "size": round(size, 2),
         "margin": round(margin, 4),

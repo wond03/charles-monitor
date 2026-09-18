@@ -67,11 +67,12 @@ def symbol_signals(sym_cfg: dict, eng_cfg: dict, webhook: str) -> dict:
         h1 = fetch_klines(inst, "1h", eng_cfg["h1_lookback"], sources)
         m15 = fetch_klines(inst, "15m", eng_cfg["m15_lookback"], sources)
         h4 = fetch_klines(inst, "4h", eng_cfg["h4_lookback"], sources)
+        m5 = fetch_klines(inst, "5m", eng_cfg.get("m5_lookback", 240), sources)
     except Exception as e:  # noqa: BLE001
         log.warning("[%s] 数据获取失败: %s", name, e)
         return result
 
-    sigs = scan_symbol(to_klines(h1), to_klines(m15), to_klines(h4), name, eng_cfg)
+    sigs = scan_symbol(to_klines(h1), to_klines(m15), to_klines(h4), to_klines(m5), name, eng_cfg)
     price = last_price(h1)
     extra = ""  # 额外说明行（当前不附加，保持消息精简）
     h1_ma = eng_cfg.get("trend_ma", 50)

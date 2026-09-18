@@ -33,8 +33,10 @@ engine:
   h1_lookback: 120            # 1H 级别参与计算的K线根数
   m15_lookback: 120           # 15M 级别参与计算的K线根数
   h4_lookback: 120            # 4H 级别参与计算的K线根数
+  m5_lookback: 240            # 5M 级别参与计算的K线根数（模板确认层）
   pivot_radius_h1: 3          # 1H swing 高/低点判断半径(左右各几根)
   pivot_radius_m15: 5         # 15M swing 半径
+  pivot_radius_m5: 5          # 5M swing 半径（模板5M确认层）
   level_cluster_pct: 0.15     # 关键水平聚类容差(%)
   level_min_touch: 2          # 关键位最小触及次数：手册"两点成线禁虚空"，1=不过滤(旧行为)，2=单次触及不成线
   fvg_min_pct: 0.05           # FVG缺口最小幅度(%)

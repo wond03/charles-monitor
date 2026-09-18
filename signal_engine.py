@@ -401,12 +401,13 @@ def retrace_05_note(kl: List[Kline], direction: str, radius: int = 3) -> str:
 # ---------- 策略组装 ----------
 
 def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List[Kline],
-                symbol: str, cfg: dict) -> List[Signal]:
+                klines_m5: List[Kline], symbol: str, cfg: dict) -> List[Signal]:
     """对一个标的多级别扫描，返回信号列表"""
     out: List[Signal] = []
     h1_ma = cfg.get("trend_ma", 50)
     radius_h1 = cfg.get("pivot_radius_h1", 3)
     radius_m15 = cfg.get("pivot_radius_m15", 5)
+    radius_m5 = cfg.get("pivot_radius_m5", 5)
     cluster = cfg.get("level_cluster_pct", 0.15)
     min_touch = cfg.get("level_min_touch", 1)  # 关键位最小触及次数（手册两点成线禁虚空，>=2 过滤单点）
     fvg_min = cfg.get("fvg_min_pct", 0.05)
@@ -497,30 +498,34 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
             out.append(s2)
 
     # --- 模板策略（对齐手册 3.3：4H 定趋势 → 向下推一级到 1H 找结构 → 5M 看转势） ---
-    # 数据源暂缺 5M，确认层以 1H 结构（MSS/CHoCH/BOS）共振近似；4H 上一级是日线非周线
+    # 5M 确认层：当前 5M 出现同向转势结构（MSS/CHoCH/BOS）才视为"有转就开"
     h4_trend = trend_by_ma(klines_h4, min(h1_ma * 2, 60)) if len(klines_h4) > 20 else "flat"
+    m5_confirm = set()
+    if len(klines_m5) > 20:
+        for s5 in (detect_mss(klines_m5, radius_m5), detect_choch(klines_m5, radius_m5),
+                   detect_bos(klines_m5, radius_m5)):
+            if s5:
+                m5_confirm.add(s5.direction)
     for s in (h1_mss, h1_choch, s_bos):
         if not s:
             continue
-        if h4_trend == "up" and s.direction == "long":
+        if h4_trend == "up" and s.direction == "long" and "long" in m5_confirm:
             sl1 = struct_sl_from_swings(klines_h1, "long", radius_h1)
-            s2 = Signal(symbol=symbol, direction="long", strategy="模板", level="4H+1H",
+            s2 = Signal(symbol=symbol, direction="long", strategy="模板", level="4H+1H+5M",
                         price=s.price, key_levels=h1_levels,
-                        detail=f"4H趋势向上 + 1H {s.strategy}结构共振；"
+                        detail=f"4H趋势向上 + 1H {s.strategy}结构 + 5M转势确认；"
                                f"大级别定趋势、小级别找共振；极小止损抓大结构"
-                               f"（5M确认层待数据源支持）"
                                f"{fib_05_note.get('long', '')}",
                         entry_type="追踪委托", priority=1)
             s2.sl_price = sl1
             s2.tp_price = tp_from_rr(s.price, sl1, "long", 5.0)
             out.append(s2)
-        elif h4_trend == "down" and s.direction == "short":
+        elif h4_trend == "down" and s.direction == "short" and "short" in m5_confirm:
             sl1 = struct_sl_from_swings(klines_h1, "short", radius_h1)
-            s2 = Signal(symbol=symbol, direction="short", strategy="模板", level="4H+1H",
+            s2 = Signal(symbol=symbol, direction="short", strategy="模板", level="4H+1H+5M",
                         price=s.price, key_levels=h1_levels,
-                        detail=f"4H趋势向下 + 1H {s.strategy}结构共振；"
+                        detail=f"4H趋势向下 + 1H {s.strategy}结构 + 5M转势确认；"
                                f"大级别定趋势、小级别找共振；极小止损抓大结构"
-                               f"（5M确认层待数据源支持）"
                                f"{fib_05_note.get('short', '')}",
                         entry_type="追踪委托", priority=1)
             s2.sl_price = sl1

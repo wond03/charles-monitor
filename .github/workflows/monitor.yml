@@ -52,6 +52,23 @@ jobs:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
         run: python monitor.py --once
 
+      # 保活：GitHub schedule 依赖仓库活跃度，仓库长期无 push 会被推迟/跳过。
+      # 每次运行后强制更新时间戳并推送（commit 带 [skip ci] 避免自激触发本 workflow），
+      # 让仓库保持活跃，使下一个 schedule 更可能准点触发。
+      - name: Keep repo active (touch & push)
+        run: |
+          git config user.name "charles-monitor-bot"
+          git config user.email "actions@users.noreply.github.com"
+          mkdir -p logs
+          echo "last_scan: $(date -u +%Y-%m-%dT%H:%M:%SZ)" > logs/last_scan.txt
+          git add logs/last_scan.txt
+          if git diff --cached --quiet; then
+            echo "last_scan.txt unchanged, skip push"
+          else
+            git commit -m "chore(keep-alive): refresh last_scan timestamp [skip ci]"
+            git push
+          fi
+
   report:
     runs-on: ubuntu-latest
     steps:
@@ -84,4 +101,4 @@ jobs:
         if: github.event.schedule == '0 1 1 * *' || github.event_name == 'workflow_dispatch'
         env:
           REPORT_WECOM_WEBHOOK: ${{ secrets.REPORT_WECOM_WEBHOOK }}
-        run: python paper_report.py --period monthly --state paper_state.json --image
+        run: python paper_report.py --period monthly --state paper_state.json --pdf

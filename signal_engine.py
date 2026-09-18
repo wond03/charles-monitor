@@ -200,7 +200,7 @@ def detect_bos(kl: List[Kline], radius: int = 3) -> Optional[Signal]:
         sl = struct_sl_from_swings(kl, "long", radius)
         if sl:
             s.sl_price = sl
-            s.tp_price = tp_from_rr(cur.close, sl, "long", 3.0) or 0.0
+            s.tp_price = tp_from_rr(cur.close, sl, "long", 5.0) or 0.0
         return s
     if kind == "low" and cur.close < price:
         s = Signal(symbol="", direction="short", strategy="BOS", level="",
@@ -238,7 +238,7 @@ def detect_fake_breakout(kl: List[Kline], levels: List[dict]) -> Optional[Signal
             sl = struct_sl_from_swings(kl, "long", 3)
             if sl:
                 s.sl_price = sl
-                s.tp_price = tp_from_rr(cur.close, sl, "long", 3.0) or 0.0
+                s.tp_price = tp_from_rr(cur.close, sl, "long", 5.0) or 0.0
             return s
     return None
 
@@ -263,7 +263,7 @@ def detect_mss(kl: List[Kline], radius: int = 3) -> Optional[Signal]:
             sl = struct_sl_from_swings(kl, "long", radius)
             if sl:
                 s.sl_price = sl
-                s.tp_price = tp_from_rr(cur.close, sl, "long", 3.0) or 0.0
+                s.tp_price = tp_from_rr(cur.close, sl, "long", 5.0) or 0.0
             return s
     # 看跌MSS：swing 序列 high -> high，s2高点 < s1高点（lower high），s3回落低点被实体收穿
     if s1[2] == "high" and s2[2] == "high" and s3[2] == "low":

@@ -47,11 +47,9 @@ engine:
 #   leverage: 100            # 杠杆倍数（100x：价格反向波动1%即爆仓）
 #   risk_per_trade_pct: 1.0  # 每笔风险占余额%(对应手册：单笔风控1%)
 #   use_structure_sl_tp: true# 按手册条件判定止盈止损：止损=结构位、止盈=目标位/出量/趋势转换；false 时回退固定百分比
-#   breakeven_rr: 1.5        # 保本保护：浮盈达 1.5 倍风险 → 止损移到入场价（手册 4.3）
-#   lock_profit_rr: 3.0      # 浮盈达 3 倍风险(1:3) → 止损移到盈利位锁 1 倍风险利润（手册 4.3）
-#   lock_profit_ratio: 1.0   # 锁定利润倍数（相对初始止损距离）
+#   breakeven_cost_mult: 3.0 # 保本保护：浮盈达下单成本 N 倍（5U×3=15U）→ 止损移到入场价（用户确认口径）
 #   sl_pct: 0.8              # 兜底止损距离%(入场价上下)；100x杠杆爆仓线1%，止损必须<1%
-#   tp_rr: 2.0               # 兜底止盈 = 止损距离 × 该倍数（0.8%×2=1.6%）
+#   tp_rr: 5.0               # 兜底止盈 = 止损距离 × 该倍数（0.8%×5=4%；用户确认止盈=5R）
 #   max_hold_hours: 24       # 最长持仓时间，超时按市价强平
 #   min_size_usdt: 5         # 最小下单量：名义仓位低于该值(USDT)跳过开仓（Weex 最小单量）
 #   fee_taker: 0.0008        # 开/平仓手续费率（Weex 市价单 Taker 0.08%）
@@ -64,11 +62,9 @@ paper_trading:
   cost_per_trade_usdt: 5
   risk_per_trade_pct: 1.0
   use_structure_sl_tp: true
-  breakeven_rr: 1.5
-  lock_profit_rr: 3.0
-  lock_profit_ratio: 1.0
+  breakeven_cost_mult: 3.0
   sl_pct: 0.8
-  tp_rr: 2.0
+  tp_rr: 5.0
   max_hold_hours: 24
   min_size_usdt: 5
   fee_taker: 0.0008

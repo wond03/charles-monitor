@@ -126,7 +126,7 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
     state["balance"] = round(state["balance"] - fee_open, 2)
     now = int(time.time())
     margin = size / leverage
-    # 实际止损风险额（按当前止损距离）：用于保本/锁利阈值
+    # 实际止损风险额（按当前止损距离）
     risk = size * abs(sig.price - sl) / sig.price if sig.price > 0 else 0.0
     pos = {
         "symbol": sym,
@@ -139,6 +139,8 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
         "tp": round(tp, 2),
         "initial_sl": round(sl, 2),   # 初始止损位（保本上移的基准）
         "sl_protected": False,         # 是否已上移保本
+        "trade_cost": round(cost, 2),  # 下单成本 = 保证金 + 手续费（保本触发基准）
+        "breakeven_applied": False,    # 是否已成本上保
         "size": round(size, 2),
         "margin": round(margin, 4),
         "leverage": leverage,
@@ -214,30 +216,19 @@ def close_position(state: dict, sym: str, price: float, reason: str, realized_pn
 
 
 def _maybe_breakeven(pos: dict, price: float, cfg: dict) -> None:
-    """保本保护（手册 4.3）：
-    - 浮盈 >= 1.5 倍风险 → 止损移到入场价（保本）
-    - 浮盈 >= 3 倍风险（1:3）→ 止损移到盈利位，锁 1 倍风险利润
+    """保本保护（手册 4.3 + 用户确认口径）：
+    - 浮盈 >= 下单成本 × breakeven_cost_mult（默认3倍 = 5U×3 = 15U）→ 止损移到入场价（保本）
     """
-    risk = pos.get("risk", 0.0)
-    if risk <= 0:
+    trade_cost = float(pos.get("trade_cost", 0) or 0)
+    if trade_cost <= 0:
         return
     pnl = mark_price(pos, price)
-    be_rr = float(cfg.get("breakeven_rr", 1.5))
-    lock_rr = float(cfg.get("lock_profit_rr", 3.0))
-    lock_ratio = float(cfg.get("lock_profit_ratio", 1.0))
-    if not pos.get("sl_protected") and pnl >= risk * be_rr:
+    mult = float(cfg.get("breakeven_cost_mult", 3.0) or 3.0)
+    if not pos.get("breakeven_applied") and pnl >= trade_cost * mult:
         pos["sl"] = pos["entry"]
-        pos["sl_protected"] = True
-        log.info("保本上移: %s %s 浮盈 %.2f >= %.2f×risk，止损移至入场价 %.2f",
-                 pos["name"], pos["direction"], pnl, be_rr, pos["entry"])
-    elif pos.get("sl_protected") and pnl >= risk * lock_rr:
-        dist = abs(pos["entry"] - pos.get("initial_sl", pos["entry"]))
-        if pos["direction"] == "long":
-            pos["sl"] = pos["entry"] + dist * lock_ratio
-        else:
-            pos["sl"] = pos["entry"] - dist * lock_ratio
-        log.info("锁利上移: %s %s 浮盈 %.2f >= %.2f×risk，止损移至 %.2f",
-                 pos["name"], pos["direction"], pnl, lock_rr, pos["sl"])
+        pos["breakeven_applied"] = True
+        log.info("保本上移: %s %s 浮盈 %.2f >= 成本%.2f×%.1f=%.2f，止损移至入场价 %.2f",
+                 pos["name"], pos["direction"], pnl, trade_cost, mult, trade_cost * mult, pos["entry"])
 
 
 def manage_positions(state: dict, ctxs: dict, cfg: dict) -> list:

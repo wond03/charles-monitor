@@ -1,5 +1,5 @@
 {
-  "balance": 100.07,
+  "balance": 99.7,
   "initial_balance": 100.0,
   "peak_equity": 100.47,
   "open_positions": {
@@ -24,6 +24,30 @@
       "open_time": "2026-09-18 03:53:32",
       "entry_type": "市价委托",
       "detail": "影线下穿关键位 76530.00 后收回，疑似假突破；0.5回踩位加持(76551.35)；止损=结构位，止盈=目标位（手册条件判定）"
+    },
+    "gold": {
+      "symbol": "gold",
+      "name": "黄金永续(XAU)",
+      "direction": "long",
+      "strategy": "模板",
+      "level": "4H+15M",
+      "entry": 4359.81,
+      "sl": 4344.29,
+      "tp": 4437.4,
+      "initial_sl": 4344.29,
+      "sl_protected": false,
+      "trade_cost": 5.0,
+      "breakeven_applied": false,
+      "size": 462.96,
+      "margin": 4.6296,
+      "leverage": 100,
+      "risk": 1.65,
+      "fee_taker": 0.0008,
+      "fee_open": 0.3704,
+      "open_ts": 1789690369,
+      "open_time": "2026-09-18 08:12:49",
+      "entry_type": "追踪委托",
+      "detail": "4H趋势向上 + 15M BOS共振；大级别定趋势、小级别找共振；极小止损抓大结构；止损=结构位，止盈=目标位（手册条件判定）"
     }
   },
   "closed_trades": [

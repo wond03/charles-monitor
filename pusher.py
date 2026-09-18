@@ -133,7 +133,8 @@ def format_paper_open(pos: dict, balance: float) -> str:
     strat = f"{pos['strategy']} {lvl}" if lvl else pos['strategy']
     return "\n".join([
         f"🟢 **模拟开仓 · {pos['name']}**",
-        f"> {ts} ｜ {dir_cn} ｜ {strat}",
+        f"> {ts} ｜ {dir_cn}",
+        f"> 策略：{strat}",
         f"> 入场 **{pos['entry']:.2f}** ｜ 入场方式：{pos.get('entry_type') or '市价委托'}",
         f"> 保证金 {pos.get('margin', 0):.2f} USDT @{pos.get('leverage', 100)}x",
         f"> 止损 **{pos['sl']:.2f}**（{sl_pct:+.2f}%）",

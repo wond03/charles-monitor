@@ -35,8 +35,8 @@ class Kline:
 @dataclass
 class Signal:
     symbol: str          # BTC / 黄金
-    direction: str       # long / short
-    strategy: str        # 保底 / 归汤 / 模板 / BOS / MSS / 0.5回踩
+    direction: str       # long / short / wait（做多 / 做空 / 等待）
+    strategy: str        # 保底 / 归汤 / 模板 / BOS / MSS / 0.5回踩 / 等待
     level: str           # 1H / 15M / 4H
     price: float
     key_levels: list = field(default_factory=list)
@@ -45,7 +45,13 @@ class Signal:
     entry_type: str = ""  # 入场方式：限价委托 / 市价委托 / 条件委托 / 追踪委托
     sl_price: float = 0.0   # 结构止损位（手册条件判定）
     tp_price: float = 0.0   # 目标位（盈亏比目标）
+    rr_target: float = 0.0  # 目标盈亏比（区间上限，默认 5R；须落在 1:2~1:5 区间）
     priority: int = 99      # 条件判定优先级：越小越符合（同品种择优依据）
+
+
+# ---------- 盈亏比目标区间（用户确认口径：1:2 ~ 1:5） ----------
+RR_MIN_DEFAULT = 2.0   # 盈亏比下限：目标至少 2R 才有入场意义
+RR_MAX_DEFAULT = 5.0   # 盈亏比上限：到 TP 止盈按 5R 计算（对应手册 4.4 到TP止盈）
 
 
 # ---------- 基础工具 ----------
@@ -76,11 +82,8 @@ def detect_swings(kl: List[Kline], radius: int = 3):
     return swings
 
 
-def key_levels(kl: List[Kline], radius: int = 3, cluster_pct: float = 0.15,
-               min_touch: int = 1) -> List[dict]:
-    """swing 价格聚类为关键水平。返回 [{price, kind, count}, ...] 按最近优先。
-    min_touch>=2 时过滤虚空单点（手册：两点成线禁止虚空，单次触及不算有效结构）。
-    """
+def key_levels(kl: List[Kline], radius: int = 3, cluster_pct: float = 0.15) -> List[dict]:
+    """swing 价格聚类为关键水平。返回 [{price, kind, count}, ...] 按最近优先"""
     swings = detect_swings(kl, radius)
     if not swings:
         return []
@@ -98,8 +101,6 @@ def key_levels(kl: List[Kline], radius: int = 3, cluster_pct: float = 0.15,
                 break
         if not placed:
             levels.append({"price": price, "kind": kind, "ts": kl[idx].ts, "count": 1})
-    if min_touch > 1:
-        levels = [lv for lv in levels if lv["count"] >= min_touch]
     levels.sort(key=lambda x: -x["ts"])
     return levels[:10]
 
@@ -213,108 +214,34 @@ def detect_bos(kl: List[Kline], radius: int = 3) -> Optional[Signal]:
         sl = struct_sl_from_swings(kl, "short", radius)
         if sl:
             s.sl_price = sl
-            s.tp_price = tp_from_rr(cur.close, sl, "short", 3.0) or 0.0
+            s.tp_price = tp_from_rr(cur.close, sl, "short", RR_MAX_DEFAULT) or 0.0
         return s
     return None
 
 
-def detect_fake_breakout(kl: List[Kline], levels: List[dict], window: int = 6) -> Optional[Signal]:
-    """归汤·假突破（对齐手册 3.2 六步，含第④步转势确认）：
-    1) 最近 window 根 K 线内出现影线穿关键位但收盘收回（假突破形态）
-    2) 当前 K 线实体收穿最近反向 swing（转势确认）才推信号
-    未确认转势返回 None（手册 2.4：假突破之后看有没有转，没转继续原方向）
-    """
-    if len(kl) < 3:
+def detect_fake_breakout(kl: List[Kline], levels: List[dict]) -> Optional[Signal]:
+    """归汤·假突破：最新一根影线穿过关键水平但收盘收回"""
+    if len(kl) < 2:
         return None
-    n = len(kl)
-    # 1) 最近 window 根内找假突破形态：记录方向（向上假突破→short，向下假突破→long）
-    fake = None
-    for idx in range(n - 1, max(0, n - 1 - window), -1):
-        cur = kl[idx]
-        for lv in levels:
-            p = lv["price"]
-            if cur.high > p > cur.close and cur.close < p and cur.high >= p * 1.0005:
-                fake = (p, "short")
-                break
-            if cur.low < p < cur.close and cur.low <= p * 0.9995:
-                fake = (p, "long")
-                break
-        if fake:
-            break
-    if fake is None:
-        return None
-    p, fake_dir = fake
-    # 2) 转势确认：当前 K 线实体收穿最近反向 swing
-    swings = detect_swings(kl, 3)
-    if not swings:
-        return None
-    cur = kl[-1]
-    if fake_dir == "long":
-        highs = [x for _, x, k in swings if k == "high"]
-        if not highs or cur.close <= highs[-1]:
-            return None
-        confirm_detail = f"实体收穿最近高点 {highs[-1]:.2f} 确认转势"
-    else:
-        lows = [x for _, x, k in swings if k == "low"]
-        if not lows or cur.close >= lows[-1]:
-            return None
-        confirm_detail = f"实体收穿最近低点 {lows[-1]:.2f} 确认转势"
-    # 确认后生成信号
-    if fake_dir == "short":
-        s = Signal(symbol="", direction="short", strategy="归汤", level="",
-                   price=cur.close, key_levels=[p],
-                   detail=f"影线上穿关键位 {p:.2f} 后收回，{confirm_detail}", priority=4)
-        sl = struct_sl_from_swings(kl, "short", 3)
-        if sl:
-            s.sl_price = sl
-            s.tp_price = tp_from_rr(cur.close, sl, "short", 3.0) or 0.0
-        return s
-    s = Signal(symbol="", direction="long", strategy="归汤", level="",
-               price=cur.close, key_levels=[p],
-               detail=f"影线下穿关键位 {p:.2f} 后收回，{confirm_detail}", priority=4)
-    sl = struct_sl_from_swings(kl, "long", 3)
-    if sl:
-        s.sl_price = sl
-        s.tp_price = tp_from_rr(cur.close, sl, "long", 5.0) or 0.0
-    return s
-
-
-def detect_mss(kl: List[Kline], radius: int = 3) -> Optional[Signal]:
-    """MSS 回踩型转势（对齐手册 2.3 定义）：
-    看涨 MSS：上涨段高点 high1 → 回踩低点 low2 → 实体升破 high1
-    看跌 MSS：下跌段低点 low1 → 回踩高点 high2 → 实体跌破 low1
-    配对规则：最后 swing 与其前最近反向 swing 配对（连续同型 swing 不阻断）
-    """
-    if len(kl) < radius * 2 + 5:
-        return None
-    swings = detect_swings(kl, radius)
-    if len(swings) < 2:
-        return None
-    last = swings[-1]
-    prev = None
-    for s in reversed(swings[:-1]):
-        if s[2] != last[2]:
-            prev = s
-            break
-    if prev is None:
-        return None
-    cur = kl[-1]
-    # 看跌 MSS：低点 low1(prev) → 回踩高点 high2(last) → 实体跌破 low1
-    if last[2] == "high" and prev[2] == "low":
-        if cur.close < prev[1]:
-            s = Signal(symbol="", direction="short", strategy="MSS", level="",
-                       price=cur.close, detail=f"回踩后实体跌破前低 {prev[1]:.2f}", priority=3)
-            sl = struct_sl_from_swings(kl, "short", radius)
+    cur, prev = kl[-1], kl[-2]
+    for lv in levels:
+        p = lv["price"]
+        # 向上假突破：最高价超过水平，但收盘收回水平下方
+        if cur.high > p > cur.close and cur.close < p and cur.high >= p * 1.0005:
+            s = Signal(symbol="", direction="short", strategy="归汤", level="",
+                       price=cur.close, key_levels=[p],
+                       detail=f"影线上穿关键位 {p:.2f} 后收回，疑似假突破", priority=4)
+            sl = struct_sl_from_swings(kl, "short", 3)
             if sl:
                 s.sl_price = sl
-                s.tp_price = tp_from_rr(cur.close, sl, "short", 3.0) or 0.0
+                s.tp_price = tp_from_rr(cur.close, sl, "short", RR_MAX_DEFAULT) or 0.0
             return s
-    # 看涨 MSS：高点 high1(prev) → 回踩低点 low2(last) → 实体升破 high1
-    if last[2] == "low" and prev[2] == "high":
-        if cur.close > prev[1]:
-            s = Signal(symbol="", direction="long", strategy="MSS", level="",
-                       price=cur.close, detail=f"回踩后实体升破前高 {prev[1]:.2f}", priority=3)
-            sl = struct_sl_from_swings(kl, "long", radius)
+        # 向下假突破：最低价低于水平，但收盘收回水平上方
+        if cur.low < p < cur.close and cur.low <= p * 0.9995:
+            s = Signal(symbol="", direction="long", strategy="归汤", level="",
+                       price=cur.close, key_levels=[p],
+                       detail=f"影线下穿关键位 {p:.2f} 后收回，疑似假突破", priority=4)
+            sl = struct_sl_from_swings(kl, "long", 3)
             if sl:
                 s.sl_price = sl
                 s.tp_price = tp_from_rr(cur.close, sl, "long", 5.0) or 0.0
@@ -322,10 +249,10 @@ def detect_mss(kl: List[Kline], radius: int = 3) -> Optional[Signal]:
     return None
 
 
-def detect_choch(kl: List[Kline], radius: int = 3) -> Optional[Signal]:
-    """CHoCH 突破型转势（对齐手册 2.2 定义）：
-    看涨 CHoCH：低点 low1 → 反弹高点 high2 → 更低低点 low3 → 实体收穿 high2
-    看跌 CHoCH：高点 high1 → 回落低点 low2 → 更高高点 high3 → 实体收穿 low2
+def detect_mss(kl: List[Kline], radius: int = 3) -> Optional[Signal]:
+    """MSS 回踩型转势（简化规则）：
+    看涨MSS: 出现更低低点(lower low)后反弹形成回踩，随后实体收穿回踩前的局部高点
+    看跌MSS: 出现更高高点(higher high)后回落，随后实体收穿回踩前的局部低点
     """
     if len(kl) < radius * 2 + 5:
         return None
@@ -334,25 +261,25 @@ def detect_choch(kl: List[Kline], radius: int = 3) -> Optional[Signal]:
         return None
     s1, s2, s3 = swings[-3], swings[-2], swings[-1]
     cur = kl[-1]
-    # 看涨 CHoCH：low→high→low，s3 更低低点(s3<s1)，实体收穿 s2 反弹高点
-    if s1[2] == "low" and s2[2] == "high" and s3[2] == "low":
-        if s3[1] < s1[1] and cur.close > s2[1]:
-            s = Signal(symbol="", direction="long", strategy="CHoCH", level="",
-                       price=cur.close, detail=f"更低低点后实体收穿反弹高点 {s2[1]:.2f}", priority=3)
+    # 看涨MSS：swing 序列 low -> low，s2低点 > s1低点（higher low），s3反弹高点被实体收穿
+    if s1[2] == "low" and s2[2] == "low" and s3[2] == "high":
+        if s2[1] > s1[1] and cur.close > s3[1]:
+            s = Signal(symbol="", direction="long", strategy="MSS", level="",
+                       price=cur.close, detail=f"更高低点回踩后实体收穿反弹高点 {s3[1]:.2f}", priority=3)
             sl = struct_sl_from_swings(kl, "long", radius)
             if sl:
                 s.sl_price = sl
                 s.tp_price = tp_from_rr(cur.close, sl, "long", 5.0) or 0.0
             return s
-    # 看跌 CHoCH：high→low→high，s3 更高高点(s3>s1)，实体收穿 s2 回落低点
-    if s1[2] == "high" and s2[2] == "low" and s3[2] == "high":
-        if s3[1] > s1[1] and cur.close < s2[1]:
-            s = Signal(symbol="", direction="short", strategy="CHoCH", level="",
-                       price=cur.close, detail=f"更高高点后实体收穿回落低点 {s2[1]:.2f}", priority=3)
+    # 看跌MSS：swing 序列 high -> high，s2高点 < s1高点（lower high），s3回落低点被实体收穿
+    if s1[2] == "high" and s2[2] == "high" and s3[2] == "low":
+        if s2[1] < s1[1] and cur.close < s3[1]:
+            s = Signal(symbol="", direction="short", strategy="MSS", level="",
+                       price=cur.close, detail=f"更低高点回踩后实体收穿回落低点 {s3[1]:.2f}", priority=3)
             sl = struct_sl_from_swings(kl, "short", radius)
             if sl:
                 s.sl_price = sl
-                s.tp_price = tp_from_rr(cur.close, sl, "short", 3.0) or 0.0
+                s.tp_price = tp_from_rr(cur.close, sl, "short", RR_MAX_DEFAULT) or 0.0
             return s
     return None
 
@@ -401,49 +328,42 @@ def retrace_05_note(kl: List[Kline], direction: str, radius: int = 3) -> str:
 # ---------- 策略组装 ----------
 
 def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List[Kline],
-                klines_m5: List[Kline], symbol: str, cfg: dict) -> List[Signal]:
+                symbol: str, cfg: dict) -> List[Signal]:
     """对一个标的多级别扫描，返回信号列表"""
     out: List[Signal] = []
     h1_ma = cfg.get("trend_ma", 50)
     radius_h1 = cfg.get("pivot_radius_h1", 3)
     radius_m15 = cfg.get("pivot_radius_m15", 5)
-    radius_m5 = cfg.get("pivot_radius_m5", 5)
     cluster = cfg.get("level_cluster_pct", 0.15)
-    min_touch = cfg.get("level_min_touch", 1)  # 关键位最小触及次数（手册两点成线禁虚空，>=2 过滤单点）
     fvg_min = cfg.get("fvg_min_pct", 0.05)
+    # 盈亏比目标区间（用户确认口径：1:2 ~ 1:5；兼容旧配置 tp_rr 单值）
+    rr_min = float(cfg.get("tp_rr_min", RR_MIN_DEFAULT))
+    rr_max = float(cfg.get("tp_rr_max", cfg.get("tp_rr", RR_MAX_DEFAULT)))
+    rr_max = max(rr_max, rr_min)
 
     # --- 1H 级别信号 ---
     h1_trend = trend_by_ma(klines_h1, h1_ma)
-    h1_levels = key_levels(klines_h1, radius_h1, cluster, min_touch)
-    push_struct = cfg.get("push_structure_signals", True)  # true=结构标记(BOS/MSS/CHoCH)保留推送；false=仅作结构标记不推送
+    h1_levels = key_levels(klines_h1, radius_h1, cluster)
     # 0.5 回踩位附加确认（对应手册 3.1）：不单独推送，结构信号命中且价格恰在 0.5 位附近时标注加分
     fib_05_note = {d: retrace_05_note(klines_h1, d, radius_h1) for d in ("long", "short")}
 
-    # BOS（结构破坏）——手册定位为结构标记，是否独立推送由 push_structure_signals 控制
+    # BOS（结构破坏）
     s_bos = detect_bos(klines_h1, radius_h1)
-    if s_bos and push_struct:
+    if s_bos:
         s_bos.symbol, s_bos.level = symbol, "1H"
         s_bos.entry_type = "市价委托"
         s_bos.detail += fib_05_note.get(s_bos.direction, "")
         out.append(s_bos)
 
-    # MSS（回踩型转势，对齐手册 2.3）
+    # MSS（回踩型转势）
     s_mss = detect_mss(klines_h1, radius_h1)
-    if s_mss and push_struct:
+    if s_mss:
         s_mss.symbol, s_mss.level = symbol, "1H"
         s_mss.entry_type = "市价委托"
         s_mss.detail += fib_05_note.get(s_mss.direction, "")
         out.append(s_mss)
 
-    # CHoCH（突破型转势，对齐手册 2.2）
-    s_choch = detect_choch(klines_h1, radius_h1)
-    if s_choch and push_struct:
-        s_choch.symbol, s_choch.level = symbol, "1H"
-        s_choch.entry_type = "市价委托"
-        s_choch.detail += fib_05_note.get(s_choch.direction, "")
-        out.append(s_choch)
-
-    # 归汤·假突破（1H 关键水平 + 转势确认，对齐手册 3.2 六步）
+    # 归汤·假突破（1H 关键水平）
     s_fake = detect_fake_breakout(klines_h1, h1_levels)
     if s_fake:
         s_fake.symbol, s_fake.level = symbol, "1H"
@@ -451,86 +371,96 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
         s_fake.detail += fib_05_note.get(s_fake.direction, "")
         out.append(s_fake)
 
-    # --- 保底策略组合（对齐手册：1H 数结构 + 15M 转势确认 + FVG 硬性） ---
-    m15_levels = key_levels(klines_m15, radius_m15, cluster, min_touch)
+    # --- 保底策略组合：1H 趋势方向 + 15M 转势确认 + FVG 过滤 ---
+    m15_levels = key_levels(klines_m15, radius_m15, cluster)
+    m15_trend = trend_by_ma(klines_m15, min(h1_ma // 2, 30))
     m15_fvg = last_fvg(klines_m15, 8, fvg_min)
 
-    h1_mss = detect_mss(klines_h1, radius_h1)
-    h1_choch = detect_choch(klines_h1, radius_h1)
-    # 1H 结构前提：必须已形成 MSS/CHoCH（数结构），方向即结构方向
-    h1_struct_dir = None
-    if h1_mss:
-        h1_struct_dir = h1_mss.direction
-    elif h1_choch:
-        h1_struct_dir = h1_choch.direction
-
     s_m15_mss = detect_mss(klines_m15, radius_m15)
-    s_m15_choch = detect_choch(klines_m15, radius_m15)
     s_m15_bos = detect_bos(klines_m15, radius_m15)
 
-    for s in (s_m15_mss, s_m15_choch):
+    for s in (s_m15_mss, s_m15_bos):
         if not s:
             continue
-        # 1H 结构方向一致 + 15M 转势同向 + 15M 必须有 FVG（硬性，无 FVG 不做）
-        if h1_struct_dir is None or h1_struct_dir != s.direction:
+        # 方向与 1H 趋势同向 且 15M 有 FVG 支持（保底：新建信号对象，不污染原 MSS/BOS 供模板复用）
+        if h1_trend == "up" and s.direction == "long":
+            if m15_fvg == "bull" or m15_trend == "up":
+                s2 = Signal(symbol=symbol, direction="long", strategy="保底", level="15M",
+                            price=s.price, key_levels=[lv["price"] for lv in h1_levels[:4]],
+                            detail=f"1H趋势向上 + 15M {s.strategy}确认 + FVG支持；"
+                                   f"止损=1H结构下方，目标1:2~1:5（到TP止盈）"
+                                   f"{fib_05_note.get('long', '')}",
+                            entry_type="条件委托", priority=2)
+                sl = struct_sl_from_swings(klines_h1, "long", radius_h1)
+                s2.sl_price = sl
+                s2.tp_price = tp_from_rr(s.price, sl, "long", rr_max)
+                s2.rr_target = rr_max
+                out.append(s2)
+        elif h1_trend == "down" and s.direction == "short":
+            if m15_fvg == "bear" or m15_trend == "down":
+                s2 = Signal(symbol=symbol, direction="short", strategy="保底", level="15M",
+                            price=s.price, key_levels=[lv["price"] for lv in h1_levels[:4]],
+                            detail=f"1H趋势向下 + 15M {s.strategy}确认 + FVG支持；"
+                                   f"止损=1H结构上方，目标1:2~1:5（到TP止盈）"
+                                   f"{fib_05_note.get('short', '')}",
+                            entry_type="条件委托", priority=2)
+                sl = struct_sl_from_swings(klines_h1, "short", radius_h1)
+                s2.sl_price = sl
+                s2.tp_price = tp_from_rr(s.price, sl, "short", rr_max)
+                s2.rr_target = rr_max
+                out.append(s2)
+
+    # --- 模板策略：4H 趋势 + 15M 共振 ---
+    h4_trend = trend_by_ma(klines_h4, min(h1_ma * 2, 60)) if len(klines_h4) > 20 else "flat"
+    for s in (s_m15_mss, s_m15_bos):
+        if not s:
             continue
-        if s.direction == "long" and m15_fvg == "bull":
-            s2 = Signal(symbol=symbol, direction="long", strategy="保底", level="15M",
-                        price=s.price, key_levels=[lv["price"] for lv in h1_levels[:4]],
-                        detail=f"1H {h1_struct_dir}结构(MSS/CHoCH) + 15M {s.strategy}确认 + FVG必有；"
-                               f"止损=1H结构下方，目标1:5（到TP止盈）"
+        if h4_trend == "up" and s.direction == "long":
+            sl15 = struct_sl_from_swings(klines_m15, "long", radius_m15)
+            s2 = Signal(symbol=symbol, direction="long", strategy="模板", level="4H+15M",
+                        price=s.price, key_levels=s.key_levels,
+                        detail=f"4H趋势向上 + 15M {s.strategy}共振；"
+                               f"大级别定趋势、小级别找共振；极小止损抓大结构，目标1:2~1:5"
                                f"{fib_05_note.get('long', '')}",
-                        entry_type="条件委托", priority=2)
-            sl = struct_sl_from_swings(klines_h1, "long", radius_h1)
-            s2.sl_price = sl
-            s2.tp_price = tp_from_rr(s.price, sl, "long", 5.0)
+                        entry_type="追踪委托", priority=1)
+            s2.sl_price = sl15
+            s2.tp_price = tp_from_rr(s.price, sl15, "long", rr_max)
+            s2.rr_target = rr_max
             out.append(s2)
-        elif s.direction == "short" and m15_fvg == "bear":
-            s2 = Signal(symbol=symbol, direction="short", strategy="保底", level="15M",
-                        price=s.price, key_levels=[lv["price"] for lv in h1_levels[:4]],
-                        detail=f"1H {h1_struct_dir}结构(MSS/CHoCH) + 15M {s.strategy}确认 + FVG必有；"
-                               f"止损=1H结构上方，目标1:5（到TP止盈）"
+        elif h4_trend == "down" and s.direction == "short":
+            sl15 = struct_sl_from_swings(klines_m15, "short", radius_m15)
+            s2 = Signal(symbol=symbol, direction="short", strategy="模板", level="4H+15M",
+                        price=s.price, key_levels=s.key_levels,
+                        detail=f"4H趋势向下 + 15M {s.strategy}共振；"
+                               f"大级别定趋势、小级别找共振；极小止损抓大结构，目标1:2~1:5"
                                f"{fib_05_note.get('short', '')}",
-                        entry_type="条件委托", priority=2)
-            sl = struct_sl_from_swings(klines_h1, "short", radius_h1)
-            s2.sl_price = sl
-            s2.tp_price = tp_from_rr(s.price, sl, "short", 5.0)
+                        entry_type="追踪委托", priority=1)
+            s2.sl_price = sl15
+            s2.tp_price = tp_from_rr(s.price, sl15, "short", rr_max)
+            s2.rr_target = rr_max
             out.append(s2)
 
-    # --- 模板策略（对齐手册 3.3：4H 定趋势 → 向下推一级到 1H 找结构 → 5M 看转势） ---
-    # 5M 确认层：当前 5M 出现同向转势结构（MSS/CHoCH/BOS）才视为"有转就开"
-    h4_trend = trend_by_ma(klines_h4, min(h1_ma * 2, 60)) if len(klines_h4) > 20 else "flat"
-    m5_confirm = set()
-    if len(klines_m5) > 20:
-        for s5 in (detect_mss(klines_m5, radius_m5), detect_choch(klines_m5, radius_m5),
-                   detect_bos(klines_m5, radius_m5)):
-            if s5:
-                m5_confirm.add(s5.direction)
-    for s in (h1_mss, h1_choch, s_bos):
-        if not s:
-            continue
-        if h4_trend == "up" and s.direction == "long" and "long" in m5_confirm:
-            sl1 = struct_sl_from_swings(klines_h1, "long", radius_h1)
-            s2 = Signal(symbol=symbol, direction="long", strategy="模板", level="4H+1H+5M",
-                        price=s.price, key_levels=h1_levels,
-                        detail=f"4H趋势向上 + 1H {s.strategy}结构 + 5M转势确认；"
-                               f"大级别定趋势、小级别找共振；极小止损抓大结构"
-                               f"{fib_05_note.get('long', '')}",
-                        entry_type="追踪委托", priority=1)
-            s2.sl_price = sl1
-            s2.tp_price = tp_from_rr(s.price, sl1, "long", 5.0)
-            out.append(s2)
-        elif h4_trend == "down" and s.direction == "short" and "short" in m5_confirm:
-            sl1 = struct_sl_from_swings(klines_h1, "short", radius_h1)
-            s2 = Signal(symbol=symbol, direction="short", strategy="模板", level="4H+1H+5M",
-                        price=s.price, key_levels=h1_levels,
-                        detail=f"4H趋势向下 + 1H {s.strategy}结构 + 5M转势确认；"
-                               f"大级别定趋势、小级别找共振；极小止损抓大结构"
-                               f"{fib_05_note.get('short', '')}",
-                        entry_type="追踪委托", priority=1)
-            s2.sl_price = sl1
-            s2.tp_price = tp_from_rr(s.price, sl1, "short", 5.0)
-            out.append(s2)
+    # --- 1H 级结构信号（BOS/MSS/归汤）统一盈亏比目标 ---
+    # 止盈目标按区间上限 rr_max 计算（对应手册 4.4：到TP止盈），目标盈亏比须落在 1:2~1:5
+    for s in out:
+        if s.direction in ("long", "short") and s.sl_price and s.price > 0:
+            s.tp_price = tp_from_rr(s.price, s.sl_price, s.direction, rr_max)
+            s.rr_target = rr_max
+
+    # --- 等待信号：无入场信号时透出观望状态（不触发开仓，仅提醒人工等待） ---
+    if not out:
+        trend_cn = {"up": "偏多", "down": "偏空", "flat": "震荡"}.get(h1_trend, "震荡")
+        m15_note = ""
+        if m15_fvg:
+            m15_note = f"；15M 存在FVG({'看涨' if m15_fvg == 'bull' else '看跌'})，观察回踩确认"
+        wait = Signal(symbol=symbol, direction="wait", strategy="等待", level="1H+15M",
+                      price=klines_h1[-1].close if klines_h1 else 0.0,
+                      key_levels=[lv["price"] for lv in h1_levels[:2]],
+                      detail=f"当前无入场信号，等待状态；1H趋势{trend_cn}"
+                             f"{'，等待15M结构确认' if m15_note else '，等待假突破/结构破坏出现明确方向'}"
+                             f"{m15_note}；入场须满足目标盈亏比1:2~1:5",
+                      priority=99)
+        out.append(wait)
 
     # 附：1H 趋势状态（不推送，供日志）
     log.debug("[%s] 引擎扫描完成：%d 个信号 %s", symbol, len(out),

@@ -7,10 +7,12 @@
   - 每笔风险 = 账户余额 × risk_per_trade_pct（默认 1%）
   - 杠杆 = leverage（默认 100x），保证金 = 名义仓位 / 杠杆
   - 爆仓：价格反向波动达到 100/杠杆 % 时亏光保证金强平（100x → 1%）
-  - 止损 = 入场价 ± sl_pct（默认 0.8%，须小于爆仓线 1%）
-  - 止盈 = 入场价 ± sl_pct × tp_rr（默认 0.8% × 2 = 1.6%）
-  - 反向信号 → 平旧仓并反手开新仓
-  - 超时未平 → 按市价强平（默认 24h，日内交易模式）
+  - 止损 = 入场价 ± sl_pct（默认 1.0%，实际取 min(sl_pct, 爆仓线×0.95)，100x 下封顶 0.95%）
+  - 止盈 = 入场价 ± 止损距离 × tp_rr（默认 5R；无结构目标位时兜底 = 0.95% × 5 = 4.75%）
+  - 反向信号 → 平旧仓并反手开新仓（须级别/策略满足反手条件）
+  - 超时未平 → 按市价强平（默认 48h，日内交易模式）
+  - 单日过滤：日内开仓最多 max_daily_trades 单（默认 10 单，自然日北京时间计数）
+  - 连亏过滤：连续亏损达 max_consecutive_losses 单（默认 3 单）暂停开仓，下个自然日自动重置
 
 状态持久化：paper_state.json（本地部署写本地文件；GitHub Actions 运行结束后
 由 monitor.py 提交回仓库，保证云端状态不丢）。
@@ -22,10 +24,9 @@ import time
 
 log = logging.getLogger(__name__)
 
-# 统一使用北京时间（GitHub runner 默认 UTC，tzset 在部分环境不生效，改用显式偏移）
+# 统一使用北京时间（GitHub runner 默认 UTC）
 os.environ.setdefault("TZ", "Asia/Shanghai")
 time.tzset()
-BJ_TZ = 8 * 3600
 
 DEFAULT_STATE = {
     "balance": 100.0,            # 当前余额(USDT)
@@ -34,21 +35,36 @@ DEFAULT_STATE = {
     "open_positions": {},        # symbol -> position dict
     "closed_trades": [],         # 最近100笔已平仓记录
     "stats": {"wins": 0, "losses": 0, "pnl": 0.0},
+    "consecutive_losses": 0,     # 连续亏损单数（连亏过滤，下个自然日自动重置）
+    "daily_trades": {},          # {"YYYY-MM-DD": 当日开仓单数}（单日过滤）
+    "last_active_date": "",      # 上次活跃日期（用于自然日切换重置连亏/单日计数）
 }
 
 
 def load_state(state_file: str) -> dict:
-    """读取模拟账户状态，文件缺失/损坏时用默认初始状态"""
+    """读取模拟账户状态，文件缺失/损坏时用默认初始状态。
+    跨自然日（北京时间）自动重置连亏计数与单日开仓计数。"""
     if os.path.exists(state_file):
         try:
             with open(state_file, "r", encoding="utf-8") as f:
                 st = json.load(f)
             for k, v in DEFAULT_STATE.items():
                 st.setdefault(k, v)
+            _rollover_daily(st)
             return st
         except Exception:  # noqa: BLE001
             pass
     return dict(DEFAULT_STATE)
+
+
+def _rollover_daily(state: dict) -> None:
+    """自然日切换（北京时间）：连亏计数清零、单日开仓计数清空、更新活跃日期。
+    同日重复调用无副作用。"""
+    today = time.strftime("%Y-%m-%d")
+    if state.get("last_active_date") != today:
+        state["consecutive_losses"] = 0
+        state["daily_trades"] = {}
+        state["last_active_date"] = today
 
 
 def save_state(state: dict, state_file: str) -> None:
@@ -56,20 +72,23 @@ def save_state(state: dict, state_file: str) -> None:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
-def _sl_tp(entry: float, direction: str, sl_pct: float, tp_rr: float):
-    """计算止损/止盈价格。long: 止损下方、止盈上方；short 相反"""
+def winrate(state: dict) -> float:
+    """方向正确率（胜率门槛口径：方向正确率≥70%后再优化入场）。
+    按已平仓交易中 pnl>=0 的比例计算。"""
+    s = state.get("stats", {}) or {}
+    wins = int(s.get("wins", 0) or 0)
+    losses = int(s.get("losses", 0) or 0)
+    n = wins + losses
+    return wins / n * 100 if n else 0.0
+
+
+def _sl_tp(entry: float, direction: str, sl_pct: float, tp_rr_max: float):
+    """计算止损/止盈价格。long: 止损下方、止盈上方；short 相反。
+    tp_rr_max 为目标盈亏比上限（区间 1:2~1:5，止盈按上限 5R 计算）。"""
     sign = 1 if direction == "long" else -1
     sl = entry * (1 - sign * sl_pct / 100.0)
-    tp = entry * (1 + sign * sl_pct * tp_rr / 100.0)
+    tp = entry * (1 + sign * sl_pct * tp_rr_max / 100.0)
     return sl, tp
-
-
-def _size(entry: float, sl: float, risk_usdt: float) -> float:
-    """按止损距离计算名义仓位(USDT)，使止损亏损≈风险额"""
-    dist = abs(entry - sl) / entry
-    if dist <= 0:
-        return 0.0
-    return risk_usdt / dist
 
 
 def _size_by_cost(cost_usdt: float, leverage: int, fee_taker: float) -> float:
@@ -94,14 +113,30 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
         return None
     if sig.direction not in ("long", "short"):
         return None
+    # 单日过滤：日内开仓最多 max_daily_trades 单（自然日，北京时间）
+    max_daily = int(cfg.get("max_daily_trades", 10) or 10)
+    today = time.strftime("%Y-%m-%d")
+    daily_cnt = int(state.get("daily_trades", {}).get(today, 0))
+    if daily_cnt >= max_daily:
+        log.info("单日过滤: %s 当日已开 %d 单(上限 %d)，跳过开仓 %s", today, daily_cnt, max_daily, sig.symbol)
+        return None
+    # 连亏过滤：连续亏损达阈值暂停开仓，下个自然日自动重置
+    max_losses = int(cfg.get("max_consecutive_losses", 3) or 3)
+    if int(state.get("consecutive_losses", 0)) >= max_losses:
+        log.info("连亏过滤: 已连亏 %d 单(上限 %d)，暂停交易待复盘，跳过开仓 %s",
+                 state.get("consecutive_losses"), max_losses, sig.symbol)
+        return None
     balance = state["balance"]
     leverage = int(cfg.get("leverage", 100) or 1)
     fee_taker = float(cfg.get("fee_taker", 0.0008) or 0.0008)
     cost = float(cfg.get("cost_per_trade_usdt", 5) or 5)  # 每次开仓固定成本 = 保证金 + 手续费
-    liq_dist = 100.0 / max(leverage, 1)
-    # 固定止损默认 sl_pct，但须在爆仓线内留 5% 余量（100x → min(1%, 0.95%)）
-    sl_pct_eff = min(float(cfg.get("sl_pct", 0.8) or 0.8), liq_dist * 0.95)
-    sl_default, tp_default = _sl_tp(sig.price, sig.direction, sl_pct_eff, cfg["tp_rr"])
+    liq_dist = 100.0 / max(int(cfg.get("leverage", 100) or 1), 1)  # 爆仓线距离%
+    sl_pct_eff = min(float(cfg.get("sl_pct", 1.0) or 1.0), liq_dist * 0.95)  # 固定止损放宽1%但须在爆仓线内留5%余量(100x→0.95%)
+    # 目标盈亏比区间（用户确认口径：1:2 ~ 1:5；兼容旧配置 tp_rr 单值）
+    tp_rr_min = float(cfg.get("tp_rr_min", 2.0) or 2.0)
+    tp_rr_max = float(cfg.get("tp_rr_max", cfg.get("tp_rr", 5.0)) or 5.0)
+    tp_rr_max = max(tp_rr_max, tp_rr_min)  # 上限不低于下限，保证止盈目标 ≥2R
+    sl_default, tp_default = _sl_tp(sig.price, sig.direction, sl_pct_eff, tp_rr_max)
     sl, tp = sl_default, tp_default
     detail = sig.detail
     use_struct = bool(cfg.get("use_structure_sl_tp", True))
@@ -114,7 +149,7 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
                 sl, tp = s_sl, s_tp
                 detail = (detail or "") + "；止损=结构位，止盈=目标位（手册条件判定）"
             else:
-                detail = (detail or "") + f"；结构止损过宽({dist_pct:.2f}%)，回退固定止损{sl_pct_eff:.2f}%"
+                detail = (detail or "") + f"；结构止损过宽({dist_pct:.2f}%)，回退固定止损{sl_pct_eff}%"
     size = _size_by_cost(cost, leverage, fee_taker)
     if size <= 0:
         return None
@@ -131,6 +166,12 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
     margin = size / leverage
     # 实际止损风险额（按当前止损距离）
     risk = size * abs(sig.price - sl) / sig.price if sig.price > 0 else 0.0
+    # 实际盈亏比 = 止盈距离 / 止损距离（须落在目标区间 1:2~1:5）
+    sl_dist = abs(sig.price - sl)
+    actual_rr = abs(tp - sig.price) / sl_dist if sl_dist > 0 else 0.0
+    if actual_rr and (actual_rr < tp_rr_min - 1e-9 or actual_rr > tp_rr_max + 1e-9):
+        log.warning("盈亏比区间告警: %s %s 实际 %.2fR 超出目标区间 [%.1f, %.1f]R，请检查止损/止盈设置",
+                    sig.symbol, sig.direction, actual_rr, tp_rr_min, tp_rr_max)
     pos = {
         "symbol": sym,
         "name": sig.symbol,
@@ -140,9 +181,8 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
         "entry": round(sig.price, 2),
         "sl": round(sl, 2),
         "tp": round(tp, 2),
+        "rr": round(actual_rr, 2),          # 实际目标盈亏比（1:2~1:5 区间判定）
         "initial_sl": round(sl, 2),   # 初始止损位（保本上移的基准）
-        "sl_protected": False,         # 是否已上移保本
-        "trade_cost": round(cost, 2),  # 下单成本 = 保证金 + 手续费（保本触发基准）
         "breakeven_applied": False,    # 是否已成本上保
         "size": round(size, 2),
         "margin": round(margin, 4),
@@ -151,14 +191,24 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
         "fee_taker": fee_taker,
         "fee_open": round(fee_open, 4),
         "open_ts": now,
-        "open_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now + BJ_TZ)),
+        "open_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)),
         "entry_type": getattr(sig, "entry_type", "") or "市价委托",
         "detail": detail,
     }
     state["open_positions"][sym] = pos
-    log.info("模拟开仓: %s %s %s %s @%.2f sl=%.2f tp=%.2f size=%.2f %s",
+    # 当日开仓计数 +1（单日过滤）
+    state.setdefault("daily_trades", {})[today] = daily_cnt + 1
+    state["last_active_date"] = today
+    # 胜率门槛（用户口径：方向正确率≥70%后再优化入场；复盘标准，不阻塞开仓）
+    gate_pct = float(cfg.get("winrate_gate_pct", 70.0) or 70.0)
+    wr = winrate(state)
+    if wr >= gate_pct:
+        gate_note = f"胜率{wr:.1f}%≥{gate_pct:.0f}%，门槛已达标，可进入入场优化阶段"
+    else:
+        gate_note = f"胜率{wr:.1f}%<{gate_pct:.0f}%，未达入场优化门槛，继续按当前规则积累样本"
+    log.info("模拟开仓: %s %s %s %s @%.2f sl=%.2f tp=%.2f rr=%.2fR size=%.2f %s | %s",
              pos["name"], pos["direction"], pos["strategy"], pos["level"], pos["entry"],
-             pos["sl"], pos["tp"], pos["size"], pos["detail"] or "")
+             pos["sl"], pos["tp"], pos["rr"], pos["size"], pos["detail"] or "", gate_note)
     return pos
 
 
@@ -199,14 +249,16 @@ def close_position(state: dict, sym: str, price: float, reason: str, realized_pn
     state["peak_equity"] = max(state["peak_equity"], state["balance"])
     if pnl >= 0:
         state["stats"]["wins"] += 1
+        state["consecutive_losses"] = 0
     else:
         state["stats"]["losses"] += 1
+        state["consecutive_losses"] = int(state.get("consecutive_losses", 0)) + 1
     state["stats"]["pnl"] = round(state["balance"] - state["initial_balance"], 2)
     trade = {
         **pos,
         "exit": round(price, 2),
         "exit_ts": now,
-        "exit_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now + BJ_TZ)),
+        "exit_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)),
         "fee_close": round(fee_close, 4),
         "fee_total": round(fee_open + fee_close, 4),
         "pnl": round(pnl, 2),
@@ -219,19 +271,33 @@ def close_position(state: dict, sym: str, price: float, reason: str, realized_pn
 
 
 def _maybe_breakeven(pos: dict, price: float, cfg: dict) -> None:
-    """保本保护（手册 4.3 + 用户确认口径）：
-    - 浮盈 >= 单笔风险 × breakeven_r（默认 3R；R=该单止损距离对应风险金额）→ 止损移到入场价（保本）
+    """锁盈保护（手册 4.3 + 用户确认口径）：
+    - 浮盈 >= 单笔风险 × breakeven_r（默认 3R；R=该单止损距离对应风险金额）→ 锁利润
+    - 锁盈位置 = 入场价 ± lock_profit_r × 初始止损距离（默认锁 2R，即 3R 时锁定 2R 利润）
+    - 1:5 直接止盈由 TP 判定（止盈目标 5R）
     """
     risk = float(pos.get("risk", 0) or 0)
     if risk <= 0:
         return
     pnl = mark_price(pos, price)
     r_mult = float(cfg.get("breakeven_r", 3.0) or 3.0)
+    lock_r = float(cfg.get("lock_profit_r", 2.0) or 2.0)
     if not pos.get("breakeven_applied") and pnl >= risk * r_mult:
-        pos["sl"] = pos["entry"]
+        sl_dist = abs(float(pos.get("entry") or 0) - float(pos.get("initial_sl") or 0))
+        lock_dist = sl_dist * lock_r
+        direction = pos.get("direction")
+        if direction == "long":
+            new_sl = pos["entry"] + lock_dist
+            if sl_dist > 0 and new_sl > float(pos.get("sl") or 0):
+                pos["sl"] = round(new_sl, 2)
+        else:
+            new_sl = pos["entry"] - lock_dist
+            if sl_dist > 0 and new_sl < float(pos.get("sl") or 0):
+                pos["sl"] = round(new_sl, 2)
         pos["breakeven_applied"] = True
-        log.info("保本上移: %s %s 浮盈 %.2f >= 风险%.2f×%.1fR=%.2f，止损移至入场价 %.2f",
-                 pos["name"], pos["direction"], pnl, risk, r_mult, risk * r_mult, pos["entry"])
+        log.info("锁盈上移: %s %s 浮盈 %.2f >= 风险%.2f×%.1f=%.2f，止损移至入场价%+.2f（锁 %.1fR）",
+                 pos["name"], pos["direction"], pnl, risk, r_mult, risk * r_mult,
+                 pos["sl"] - pos["entry"], lock_r)
 
 
 def manage_positions(state: dict, ctxs: dict, cfg: dict) -> list:

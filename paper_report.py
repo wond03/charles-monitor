@@ -30,13 +30,34 @@ time.tzset()
 PERIOD_HOURS = {"weekly": 7 * 24, "monthly": 30 * 24, "all": None}
 MAX_PUSH_BYTES = 4000  # 企微 markdown 上限 4096，留余量
 
+# 胜率门槛（用户确认口径：方向正确率≥70%后再优化入场；复盘标准，不影响代码逻辑）
+WINRATE_GATE_PCT = 70.0
+
+
+def winrate_gate_pct() -> float:
+    """读取胜率门槛配置（config.yaml paper_trading.winrate_gate_pct），读不到用默认 70%"""
+    try:
+        with open("config.yaml", "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        v = (cfg.get("paper_trading") or {}).get("winrate_gate_pct")
+        return float(v) if v else WINRATE_GATE_PCT
+    except Exception:  # noqa: BLE001
+        return WINRATE_GATE_PCT
+
+
+def gate_status_text(win_rate: float, gate_pct: float) -> str:
+    """胜率门槛状态文本（复盘标准）：已达标可进入入场优化，未达标继续积累样本"""
+    if win_rate >= gate_pct:
+        return f"✅ 已达标（≥{gate_pct:.0f}%），可进入入场优化阶段"
+    return f"⏳ 未达标（需≥{gate_pct:.0f}%），继续按当前规则积累样本"
+
 # 查尔斯体系 6 类独立信号（固定展示口径；0.5回踩仅为位置筛选，不独立成类）
 SIGNAL_STRATEGIES = ["BOS", "MSS", "CHoCH", "归汤", "保底", "模板"]
 
 
 def bj_time_str(ts: float) -> str:
     """Unix 时间戳 -> 北京时间（%Y-%m-%d %H:%M），不依赖状态文件里可能时区错乱的字符串"""
-    return time.strftime("%Y-%m-%d %H:%M", time.gmtime(ts + 8 * 3600))
+    return time.strftime("%m-%d %H:%M", time.gmtime(ts + 8 * 3600))
 
 # ---------------- Pillow 图表 ----------------
 try:
@@ -51,6 +72,13 @@ _FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 ]
+
+
+def _fmt_symbol(name: str) -> str:
+    """品种显示名：黄金永续(XAU) -> XAU永续"""
+    if not name:
+        return name
+    return name.replace("黄金永续(XAU)", "XAU永续").replace("黄金永续", "XAU永续")
 
 
 def _find_font(size: int):
@@ -89,7 +117,7 @@ class _ReportPDF(_FPDF):
 
     def footer(self):
         self.set_y(-8)
-        self.set_font("NotoCJK", "", 8)
+        self.set_font("NotoCJK", "", 14)
         self.set_text_color(148, 163, 184)
         self.cell(0, 5, "模拟单仅作练习记录，不涉及真实资金", align="C")
 
@@ -127,7 +155,7 @@ def build_pdf_report(state: dict, trades: list, period: str, now_str: str, out_p
         ensure(12)
         y += 4
         pdf.set_xy(_PDF_MARGIN, y)
-        pdf.set_font("NotoCJK", "", 14)
+        pdf.set_font("NotoCJK", "", 20)
         set_text("#1f2937")
         pdf.cell(0, 8, title)
         y += 12
@@ -138,12 +166,12 @@ def build_pdf_report(state: dict, trades: list, period: str, now_str: str, out_p
 
     # 标题
     pdf.set_xy(_PDF_MARGIN, y)
-    pdf.set_font("NotoCJK", "", 19)
+    pdf.set_font("NotoCJK", "", 26)
     set_text("#1f2937")
     pdf.cell(0, 10, f"模拟盘{period_cn}（{period_start[5:10]} ~ {now_str[5:10]}）")
     y += 13
     pdf.set_xy(_PDF_MARGIN, y)
-    pdf.set_font("NotoCJK", "", 9.5)
+    pdf.set_font("NotoCJK", "", 15)
     set_text("#64748b")
     pdf.cell(0, 6, f"统计区间（北京时间）：{period_start} ~ {now_str}")
     y += 11
@@ -175,7 +203,7 @@ def build_pdf_report(state: dict, trades: list, period: str, now_str: str, out_p
         ("最大回撤", f"{mdd:.2f}%", "#dc2626", None),
     ]
     card_w = (content_w - 4 * 3) / 5
-    card_h = 26
+    card_h = 30
     ensure(card_h + 4)
     for i, (k, v, color, sub) in enumerate(overview):
         x = _PDF_MARGIN + i * (card_w + 3)
@@ -184,18 +212,18 @@ def build_pdf_report(state: dict, trades: list, period: str, now_str: str, out_p
         pdf.set_draw_color(226, 232, 240)
         pdf.rect(x, y, card_w, card_h, style="D")
         pdf.set_xy(x + 3, y + 2.5)
-        pdf.set_font("NotoCJK", "", 8)
+        pdf.set_font("NotoCJK", "", 15)
         set_text("#64748b")
-        pdf.cell(card_w - 6, 4, k, align="C")
-        pdf.set_xy(x + 3, y + 8.5)
-        pdf.set_font("NotoCJK", "", 9.5)
+        pdf.cell(card_w - 6, 6, k, align="C")
+        pdf.set_xy(x + 3, y + 9)
+        pdf.set_font("NotoCJK", "", 16)
         set_text(color)
-        pdf.cell(card_w - 6, 5, v, align="C")
+        pdf.cell(card_w - 6, 7, v, align="C")
         if sub:
-            pdf.set_xy(x + 3, y + 14.5)
-            pdf.set_font("NotoCJK", "", 8)
+            pdf.set_xy(x + 3, y + 16.5)
+            pdf.set_font("NotoCJK", "", 15)
             set_text(color)
-            pdf.cell(card_w - 6, 4, sub, align="C")
+            pdf.cell(card_w - 6, 6, sub, align="C")
     y += card_h + 4
 
     # 二、交易统计
@@ -207,7 +235,7 @@ def build_pdf_report(state: dict, trades: list, period: str, now_str: str, out_p
         ("区间盈亏", f"{sum(t.get('pnl', 0) for t in trades):+.2f} USDT"),
     ]
     card_w2 = (content_w - 3 * 3) / 4
-    card_h2 = 17
+    card_h2 = 21
     ensure(2 * (card_h2 + 3) + 4)
     for i in range(0, 8, 4):
         for j in range(4):
@@ -219,14 +247,23 @@ def build_pdf_report(state: dict, trades: list, period: str, now_str: str, out_p
             pdf.set_draw_color(226, 232, 240)
             pdf.rect(x, yy, card_w2, card_h2, style="D")
             pdf.set_xy(x + 3, yy + 2)
-            pdf.set_font("NotoCJK", "", 7.5)
+            pdf.set_font("NotoCJK", "", 14)
             set_text("#64748b")
-            pdf.cell(card_w2 - 6, 4, k, align="C")
-            pdf.set_xy(x + 3, yy + 7.5)
-            pdf.set_font("NotoCJK", "", 9)
+            pdf.cell(card_w2 - 6, 6, k, align="C")
+            pdf.set_xy(x + 3, yy + 8.5)
+            pdf.set_font("NotoCJK", "", 15)
             set_text("#1f2937")
-            pdf.cell(card_w2 - 6, 5, v, align="C")
+            pdf.cell(card_w2 - 6, 7, v, align="C")
     y += 2 * (card_h2 + 3) + 4
+
+    # 胜率门槛（复盘标准：方向正确率≥70%后优化入场）
+    ensure(8)
+    gate_txt = f"胜率门槛（复盘标准）：{gate_status_text(win_rate, winrate_gate_pct())}"
+    pdf.set_xy(_PDF_MARGIN, y)
+    pdf.set_font("NotoCJK", "", 13)
+    set_text("#64748b")
+    pdf.cell(content_w, 5, gate_txt)
+    y += 7
 
     # 三、权益曲线（矢量折线）
     section("三、权益曲线（按平仓顺序）")
@@ -263,38 +300,38 @@ def build_pdf_report(state: dict, trades: list, period: str, now_str: str, out_p
         pdf.set_fill_color(37, 99, 235)
         pdf.rect(pts[0][0] - 1.5, pts[0][1] - 1.5, 3, 3, style="F")
         pdf.rect(pts[-1][0] - 1.5, pts[-1][1] - 1.5, 3, 3, style="F")
-        pdf.set_font("NotoCJK", "", 8)
+        pdf.set_font("NotoCJK", "", 15)
         set_text("#2563eb")
         pdf.set_xy(pts[-1][0] - 20, pts[-1][1] - 6)
-        pdf.cell(24, 4, f"{cum[-1]:.2f}", align="C")
+        pdf.cell(24, 6, f"{cum[-1]:.2f}", align="C")
         set_text("#64748b")
         pdf.set_xy(chart_x, chart_y + chart_h + 1.5)
-        pdf.cell(chart_w / 2, 4, f"首笔 {bj_time_str(trades[0].get('exit_ts', 0))}")
+        pdf.cell(chart_w / 2, 6, f"首笔 {bj_time_str(trades[0].get('exit_ts', 0))}")
         pdf.set_xy(chart_x + chart_w / 2, chart_y + chart_h + 1.5)
-        pdf.cell(chart_w / 2, 4, f"末笔 {bj_time_str(trades[-1].get('exit_ts', 0))}", align="R")
+        pdf.cell(chart_w / 2, 6, f"末笔 {bj_time_str(trades[-1].get('exit_ts', 0))}", align="R")
     else:
         pdf.set_draw_color(148, 163, 184)
         pdf.line(chart_x, chart_y + chart_h / 2, chart_x + chart_w, chart_y + chart_h / 2)
-        pdf.set_font("NotoCJK", "", 10)
+        pdf.set_font("NotoCJK", "", 16)
         set_text("#94a3b8")
         pdf.set_xy(chart_x, chart_y + chart_h / 2 - 2)
-        pdf.cell(chart_w, 5, "暂无平仓记录", align="C")
+        pdf.cell(chart_w, 6, "暂无平仓记录", align="C")
     y += chart_h + 8
 
     # 四、按策略表现（6 类信号口径）
     section("四、按策略表现（6 类信号）")
     by_strategy = stat_by_strategy(trades)
     for k, g in by_strategy.items():
-        ensure(7.5)
+        ensure(8.0)
         pdf.set_xy(_PDF_MARGIN + 4, y)
-        pdf.set_font("NotoCJK", "", 10)
+        pdf.set_font("NotoCJK", "", 16)
         set_text("#334155")
         if g["n"] == 0:
             label = f"{k}  0笔"
         else:
             label = f"{k}  {g['n']}笔  胜率{g['win_rate']:.0f}%  盈亏{g['pnl']:+.2f} USDT"
         pdf.cell(0, 6, label)
-        y += 7.5
+        y += 8.0
 
     # 五、平仓原因
     by_reason = stat_by(trades, "reason")
@@ -302,25 +339,25 @@ def build_pdf_report(state: dict, trades: list, period: str, now_str: str, out_p
         section("五、平仓原因")
         reason_cn = {"TP": "止盈", "SL": "止损", "TIMEOUT": "超时强平", "REVERSE": "反向平仓", "LIQ": "爆仓"}
         for k, g in by_reason.items():
-            ensure(7.5)
+            ensure(8.0)
             pdf.set_xy(_PDF_MARGIN + 4, y)
-            pdf.set_font("NotoCJK", "", 10)
+            pdf.set_font("NotoCJK", "", 16)
             set_text("#334155")
             pdf.cell(0, 6, f"{reason_cn.get(k, k)}  {g['n']}笔")
-            y += 7.5
+            y += 8.0
 
     # 六、交易明细（矢量表格，跨页重绘表头）
     section("六、交易明细")
     if trades:
         headers = ["平仓时间(北京)", "品种", "方向", "策略", "原因", "入场", "出场", "盈亏"]
-        col_w = [33, 21, 8, 15, 15, 28, 28, 14]
+        col_w = [28, 27, 10, 19, 33, 24, 24, 21]
         remain = content_w - sum(col_w)
         col_w[0] += remain
-        row_h = 7
+        row_h = 12
         def draw_header():
             nonlocal y
             pdf.set_xy(_PDF_MARGIN, y)
-            pdf.set_font("NotoCJK", "", 8)
+            pdf.set_font("NotoCJK", "", 15)
             set_text("#64748b")
             set_fill("#f1f5f9")
             x = _PDF_MARGIN
@@ -328,8 +365,8 @@ def build_pdf_report(state: dict, trades: list, period: str, now_str: str, out_p
                 pdf.rect(x, y, col_w[i], row_h, style="F")
                 pdf.set_draw_color(226, 232, 240)
                 pdf.rect(x, y, col_w[i], row_h, style="D")
-                pdf.set_xy(x, y + 1.2)
-                pdf.cell(col_w[i], 4, h, align="C")
+                pdf.set_xy(x, y + 1.5)
+                pdf.cell(col_w[i], 7, h, align="C")
                 x += col_w[i]
             y += row_h
         draw_header()
@@ -339,11 +376,13 @@ def build_pdf_report(state: dict, trades: list, period: str, now_str: str, out_p
                 pdf.add_page()
                 y = _PDF_MARGIN
                 draw_header()
-            pnl = t.get("pnl", 0)
-            arrow = "+" if pnl >= 0 else ""
+            pnl = round(t.get("pnl", 0), 2)
+            if abs(pnl) < 0.005:
+                pnl = 0.0
+            arrow = "+" if pnl > 0 else ""
             row = [
                 bj_time_str(t.get("exit_ts", 0)),
-                t.get("name", ""),
+                _fmt_symbol(t.get("name", "")),
                 "多" if t.get("direction") == "long" else "空",
                 t.get("strategy", ""),
                 reason_cn.get(t.get("reason", ""), t.get("reason", "")),
@@ -354,12 +393,12 @@ def build_pdf_report(state: dict, trades: list, period: str, now_str: str, out_p
             x = _PDF_MARGIN
             for i, v in enumerate(row):
                 if i == len(row) - 1:
-                    set_text("#16a34a" if pnl >= 0 else "#dc2626")
+                    set_text("#16a34a" if pnl > 0 else "#dc2626")
                 else:
                     set_text("#334155")
-                pdf.set_xy(x, y + 1.2)
-                pdf.set_font("NotoCJK", "", 8)
-                pdf.cell(col_w[i], 4, v, align="C")
+                pdf.set_xy(x, y + 1.5)
+                pdf.set_font("NotoCJK", "", 15)
+                pdf.cell(col_w[i], 7, v, align="C")
                 x += col_w[i]
             pdf.set_draw_color(241, 245, 249)
             pdf.line(_PDF_MARGIN, y + row_h, _PDF_MARGIN + content_w, y + row_h)
@@ -565,11 +604,13 @@ def build_chart_image(state: dict, trades: list, period: str, now_str: str, out_
                 draw_table_header()
             d_ = "多" if t.get("direction") == "long" else "空"
             rc = {"TP": "止盈", "SL": "止损", "TIMEOUT": "超时强平", "REVERSE": "反向平仓", "LIQ": "爆仓"}.get(t.get("reason", ""), t.get("reason", ""))
-            pnl = t.get("pnl", 0)
-            arrow = "+" if pnl >= 0 else ""
+            pnl = round(t.get("pnl", 0), 2)
+            if abs(pnl) < 0.005:
+                pnl = 0.0
+            arrow = "+" if pnl > 0 else ""
             row = [
                 bj_time_str(t.get("exit_ts", 0)),
-                t.get("name", ""),
+                _fmt_symbol(t.get("name", "")),
                 d_,
                 t.get("strategy", ""),
                 rc,
@@ -696,6 +737,7 @@ def build_report(state: dict, trades: list, period: str, now_str: str) -> str:
         f"| 已平仓笔数 | {n} |",
         f"| 盈利 / 亏损 | {wins} / {losses} |",
         f"| 胜率 | **{win_rate:.1f}%** |",
+        f"| 胜率门槛 | {gate_status_text(win_rate, winrate_gate_pct())} |",
         f"| 平均盈利 | {avg_win:+.2f} USDT |",
         f"| 平均亏损 | {avg_loss:.2f} USDT |",
         f"| 盈亏比 | **{rr:.2f}** |",
@@ -736,8 +778,10 @@ def build_report(state: dict, trades: list, period: str, now_str: str) -> str:
         for t in reversed(trades[-10:]):
             d = "多" if t.get("direction") == "long" else "空"
             rc = {"TP": "止盈", "SL": "止损", "TIMEOUT": "超时强平", "REVERSE": "反向平仓", "LIQ": "爆仓"}.get(t.get("reason", ""), t.get("reason", ""))
-            pnl = t.get("pnl", 0)
-            arrow = "+" if pnl >= 0 else ""
+            pnl = round(t.get("pnl", 0), 2)
+            if abs(pnl) < 0.005:
+                pnl = 0.0
+            arrow = "+" if pnl > 0 else ""
             L.append(f"| {bj_time_str(t.get('exit_ts', 0))} | {t.get('name', '')} | {d} | {t.get('strategy', '')} | {rc} | {t.get('entry', 0):.2f} → {t.get('exit', 0):.2f} | **{arrow}{pnl:.2f}** |")
         L.append("")
 
@@ -788,6 +832,7 @@ def build_push_text(state: dict, trades: list, period: str, now_str: str) -> str
         "",
         f"**交易统计**：{n} 笔 | 胜 {wins} / 负 {losses}",
         f"> 胜率：**{win_rate:.1f}%**",
+        f"> 胜率门槛（≥{winrate_gate_pct():.0f}%后优化入场）：{gate_status_text(win_rate, winrate_gate_pct())}",
         f"> 平均盈利：{avg_win:+.2f} | 平均亏损：{avg_loss:.2f}",
         f"> 盈亏比：**{rr:.2f}**",
         f"> 单笔期望：{exp:+.2f} USDT",
@@ -900,8 +945,8 @@ def main():
                 label = "总览"
             period_cn = {"weekly": "周报", "monthly": "月报", "all": "总览"}[args.period]
             pdf_path = f"{period_cn}{label}.pdf"
-        # PDF 由 Pillow 直接绘制输出，不经过中间 PNG
-        build_chart_image(state, trades, args.period, now_str, pdf_path)
+        # PDF 由 fpdf2 矢量排版输出（原生矢量，手机端不模糊不遮挡）
+        build_pdf_report(state, trades, args.period, now_str, pdf_path)
         send_wecom_image(webhook, pdf_path)
         print(f"已生成 PDF 并推送: {pdf_path}")
     if not args.output and not args.image and not args.pdf:

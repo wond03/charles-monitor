@@ -25,7 +25,18 @@ on:
     - cron: '0 1 * * 1'
     # 每月 1 日 09:00 北京时间(=01:00 UTC)推送模拟盘月报
     - cron: '0 1 1 * *'
-  workflow_dispatch: {}   # 支持手动触发，用于测试
+  workflow_dispatch:
+    # 手动触发：默认只跑扫描；可选推周报/月报（避免同时推两份）
+    inputs:
+      report_type:
+        description: '手动触发时额外推送的报告类型（none/weekly/monthly）'
+        required: false
+        default: 'none'
+        type: choice
+        options:
+          - none
+          - weekly
+          - monthly
   push:
     # 兜底触发：每次向仓库推送代码也跑一次扫描，保证上传文件即能出结果
     branches: [ main, master ]
@@ -52,14 +63,31 @@ jobs:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
         run: python monitor.py --once
 
+      # 保活：GitHub schedule 依赖仓库活跃度，仓库长期无 push 会被推迟/跳过。
+      # 每次运行后强制更新时间戳并推送（commit 带 [skip ci] 避免自激触发本 workflow），
+      # 让仓库保持活跃，使下一个 schedule 更可能准点触发。
+      - name: Keep repo active (touch & push)
+        run: |
+          git config user.name "charles-monitor-bot"
+          git config user.email "actions@users.noreply.github.com"
+          mkdir -p .github
+          echo "last_scan: $(date -u +%Y-%m-%dT%H:%M:%SZ)" > .github/last_scan.txt
+          git add .github/last_scan.txt
+          if git diff --cached --quiet; then
+            echo "last_scan.txt unchanged, skip push"
+          else
+            git commit -m "chore(keep-alive): refresh last_scan timestamp [skip ci]"
+            git push
+          fi
+
   report:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -73,15 +101,15 @@ jobs:
             sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
           fi
 
-      - name: Push weekly report (Monday 09:00)
-        if: github.event.schedule == '0 1 * * 1' || github.event_name == 'workflow_dispatch'
+      - name: Push weekly report (Monday 09:00 or manual weekly)
+        if: github.event.schedule == '0 1 * * 1' || (github.event_name == 'workflow_dispatch' && github.event.inputs.report_type == 'weekly')
         env:
           # 报告专用 webhook 存在仓库 Secrets 中，key 名为 REPORT_WECOM_WEBHOOK
           REPORT_WECOM_WEBHOOK: ${{ secrets.REPORT_WECOM_WEBHOOK }}
         run: python paper_report.py --period weekly --state paper_state.json --pdf
 
-      - name: Push monthly report (1st 09:00)
-        if: github.event.schedule == '0 1 1 * *' || github.event_name == 'workflow_dispatch'
+      - name: Push monthly report (1st 09:00 or manual monthly)
+        if: github.event.schedule == '0 1 1 * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.report_type == 'monthly')
         env:
           REPORT_WECOM_WEBHOOK: ${{ secrets.REPORT_WECOM_WEBHOOK }}
-        run: python paper_report.py --period monthly --state paper_state.json --image
+        run: python paper_report.py --period monthly --state paper_state.json --pdf

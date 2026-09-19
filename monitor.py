@@ -28,16 +28,16 @@ time.tzset()
 
 import logger
 
-from datafeed import fetch_klines, last_price, pct_change
+from datafeed import fetch_klines, last_price
 from pusher import (load_webhook, send_wecom, send_test, format_signal,
-                    format_paper_open, format_paper_close, format_paper_status)
+                    format_paper_open, format_paper_close)
 from signal_engine import to_klines, scan_symbol, trend_by_ma, vol_surge
 import paper_trader
 
 # 可触发严谨反手的结构确认类策略（手册 4.5 换边规则）
 REVERSE_STRATEGIES = ("模板", "保底", "BOS", "MSS", "归汤")
 # 级别权重：数值越大级别越高（反手要求反向信号级别 >= 持仓级别）
-LEVEL_RANK = {"15M": 1, "1H": 2, "4H+15M": 3, "1H+15M": 3, "4H": 4, "4H+1H+5M": 5}
+LEVEL_RANK = {"15M": 1, "1H": 2, "4H+15M": 3, "1H+15M": 3, "4H": 4}
 
 
 def _level_rank_of(sig_or_pos) -> int:
@@ -67,12 +67,11 @@ def symbol_signals(sym_cfg: dict, eng_cfg: dict, webhook: str) -> dict:
         h1 = fetch_klines(inst, "1h", eng_cfg["h1_lookback"], sources)
         m15 = fetch_klines(inst, "15m", eng_cfg["m15_lookback"], sources)
         h4 = fetch_klines(inst, "4h", eng_cfg["h4_lookback"], sources)
-        m5 = fetch_klines(inst, "5m", eng_cfg.get("m5_lookback", 240), sources)
     except Exception as e:  # noqa: BLE001
         log.warning("[%s] 数据获取失败: %s", name, e)
         return result
 
-    sigs = scan_symbol(to_klines(h1), to_klines(m15), to_klines(h4), to_klines(m5), name, eng_cfg)
+    sigs = scan_symbol(to_klines(h1), to_klines(m15), to_klines(h4), name, eng_cfg)
     price = last_price(h1)
     extra = ""  # 额外说明行（当前不附加，保持消息精简）
     h1_ma = eng_cfg.get("trend_ma", 50)
@@ -128,49 +127,6 @@ def save_cooldown(cooldown: dict, path: str) -> None:
             json.dump(cooldown, f, ensure_ascii=False)
     except Exception as e:  # noqa: BLE001
         log.warning("冷却状态保存失败: %s", e)
-
-
-# ---------- 风控熔断：一天内连续止损达到阈值 → 停止开仓与推送并通报 ----------
-BJ_TZ = 8 * 3600
-LOSS_REASONS = ("止损", "爆仓")
-
-
-def _today_bj() -> str:
-    return time.strftime("%Y-%m-%d", time.localtime(time.time() + BJ_TZ))
-
-
-def _consecutive_losses(state: dict) -> int:
-    """从最近一笔平仓往前数连续亏损(止损/爆仓)单数；遇到非亏损平仓即重置"""
-    n = 0
-    for t in reversed(state.get("closed_trades", [])):
-        if t.get("reason") in LOSS_REASONS:
-            n += 1
-        else:
-            break
-    return n
-
-
-def _is_halted(state: dict) -> bool:
-    h = state.get("halt")
-    return bool(h and h.get("date") == _today_bj())
-
-
-def _check_halt(state: dict, paper_cfg: dict, webhook: str) -> None:
-    """连续止损达阈值 → 置 halt（当日熔断）并通报；已熔断或未达阈值则不动"""
-    threshold = int(paper_cfg.get("halt_after_consecutive_losses", 0) or 0)
-    if threshold <= 0 or _is_halted(state):
-        return
-    losses = _consecutive_losses(state)
-    if losses < threshold:
-        return
-    state["halt"] = {"date": _today_bj(), "losses": losses, "ts": time.time()}
-    try:
-        send_wecom(webhook,
-                   f"## ⛔ 风控熔断\n连续亏损 **{losses}** 单（止损/爆仓），"
-                   f"今日已暂停开仓与信号推送，明日自动恢复。")
-        log.warning("风控熔断: 连续亏损 %d 单，今日暂停开仓与推送", losses)
-    except Exception as e:  # noqa: BLE001
-        log.error("熔断通报发送失败: %s", e)
 
 
 def _paper_on_signal(state: dict, sym_key: str, sig, paper_cfg: dict, webhook: str) -> None:
@@ -235,9 +191,15 @@ def main():
              ", ".join(syms_on),
              {k: v.get("exchange") for k, v in cfg["symbols"].items() if v.get("enabled")},
              scan_cfg["scan_interval_seconds"], scan_cfg["cooldown_hours"])
-    log.info("模拟盘：enabled=%s，初始余额=%s，杠杆=%sx，止损=%s%%，止盈=%sR，结构位判定=%s",
+    sl_pct_cfg = float(paper_cfg.get("sl_pct") or 1.0)
+    sl_pct_eff = min(sl_pct_cfg, 100.0 / max(int(paper_cfg.get("leverage") or 100), 1) * 0.95)
+    tp_rr_min_cfg = float(paper_cfg.get("tp_rr_min", 2.0) or 2.0)
+    tp_rr_max_cfg = float(paper_cfg.get("tp_rr_max", paper_cfg.get("tp_rr", 5.0)) or 5.0)
+    gate_cfg = float(paper_cfg.get("winrate_gate_pct", 70.0) or 70.0)
+    log.info("模拟盘：enabled=%s，初始余额=%s，杠杆=%sx，止损=%s%%(实际生效%s%%)，目标盈亏比=%s~%sR，胜率门槛≥%s%%后优化入场，结构位判定=%s",
              paper_on, paper_cfg.get("initial_balance"), paper_cfg.get("leverage"),
-             paper_cfg.get("sl_pct"), paper_cfg.get("tp_rr"), paper_cfg.get("use_structure_sl_tp", True))
+             sl_pct_cfg, round(sl_pct_eff, 4), tp_rr_min_cfg, tp_rr_max_cfg, gate_cfg,
+             paper_cfg.get("use_structure_sl_tp", True))
 
     if scan_cfg.get("push_test_on_start") and not args.once:
         send_test(webhook)
@@ -269,12 +231,7 @@ def main():
                           res["vol_surge"], res["price"])
                 for sig, extra, price in res["signals"]:
                     prices[key] = price
-                    # 风控熔断：当日连续亏损达阈值 → 停止开仓与推送
-                    if paper_on and _is_halted(state):
-                        log.info("风控熔断中，跳过推送与开仓: %s %s %s",
-                                 sig.symbol, sig.strategy, sig.direction)
-                        continue
-                    ckey = ":".join([sig.symbol, sig.strategy, sig.level])
+                    ckey = ":".join([sig.symbol, sig.strategy, sig.direction, sig.level])
                     now = time.time()
                     rec = cooldown.get(ckey)
                     if rec:
@@ -287,14 +244,6 @@ def main():
                                       ckey, age, cool_sec, price_drift)
                             continue
                     cooldown[ckey] = {"ts": now, "price": price}
-                    # 反向持仓但不满足反手条件（策略不在白名单/级别不够）→ 不推送也不开仓
-                    pos = state.get("open_positions", {}).get(key)
-                    if pos and pos["direction"] != sig.direction:
-                        same_or_higher = _level_rank_of(sig) >= _level_rank_of(pos)
-                        struct_confirm = getattr(sig, "strategy", "") in REVERSE_STRATEGIES
-                        if not (same_or_higher and struct_confirm):
-                            log.info("反向不反手，跳过推送: %s %s %s", sig.symbol, sig.strategy, sig.direction)
-                            continue
                     try:
                         send_wecom(webhook, format_signal(sig, extra))
                         log.info("推送信号: %s %s %s %s @%.2f",
@@ -313,8 +262,6 @@ def main():
                         log.info("模拟平仓: %s %s %s (%s)", trade["name"], kind, trade["pnl"], trade["reason"])
                     except Exception as e:  # noqa: BLE001
                         log.error("平仓推送失败: %s", e, exc_info=True)
-                # 风控熔断检查：连续止损达阈值则当日停止开仓与推送并通报
-                _check_halt(state, paper_cfg, webhook)
                 paper_trader.save_state(state, state_file)
                 save_cooldown(cooldown, cooldown_file)
                 commit_paper_state(state_file, extra_files=[cooldown_file])

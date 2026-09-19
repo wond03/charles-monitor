@@ -72,11 +72,22 @@ def save_state(state: dict, state_file: str) -> None:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
-def _sl_tp(entry: float, direction: str, sl_pct: float, tp_rr: float):
-    """计算止损/止盈价格。long: 止损下方、止盈上方；short 相反"""
+def winrate(state: dict) -> float:
+    """方向正确率（胜率门槛口径：方向正确率≥70%后再优化入场）。
+    按已平仓交易中 pnl>=0 的比例计算。"""
+    s = state.get("stats", {}) or {}
+    wins = int(s.get("wins", 0) or 0)
+    losses = int(s.get("losses", 0) or 0)
+    n = wins + losses
+    return wins / n * 100 if n else 0.0
+
+
+def _sl_tp(entry: float, direction: str, sl_pct: float, tp_rr_max: float):
+    """计算止损/止盈价格。long: 止损下方、止盈上方；short 相反。
+    tp_rr_max 为目标盈亏比上限（区间 1:2~1:5，止盈按上限 5R 计算）。"""
     sign = 1 if direction == "long" else -1
     sl = entry * (1 - sign * sl_pct / 100.0)
-    tp = entry * (1 + sign * sl_pct * tp_rr / 100.0)
+    tp = entry * (1 + sign * sl_pct * tp_rr_max / 100.0)
     return sl, tp
 
 
@@ -121,7 +132,11 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
     cost = float(cfg.get("cost_per_trade_usdt", 5) or 5)  # 每次开仓固定成本 = 保证金 + 手续费
     liq_dist = 100.0 / max(int(cfg.get("leverage", 100) or 1), 1)  # 爆仓线距离%
     sl_pct_eff = min(float(cfg.get("sl_pct", 1.0) or 1.0), liq_dist * 0.95)  # 固定止损放宽1%但须在爆仓线内留5%余量(100x→0.95%)
-    sl_default, tp_default = _sl_tp(sig.price, sig.direction, sl_pct_eff, cfg["tp_rr"])
+    # 目标盈亏比区间（用户确认口径：1:2 ~ 1:5；兼容旧配置 tp_rr 单值）
+    tp_rr_min = float(cfg.get("tp_rr_min", 2.0) or 2.0)
+    tp_rr_max = float(cfg.get("tp_rr_max", cfg.get("tp_rr", 5.0)) or 5.0)
+    tp_rr_max = max(tp_rr_max, tp_rr_min)  # 上限不低于下限，保证止盈目标 ≥2R
+    sl_default, tp_default = _sl_tp(sig.price, sig.direction, sl_pct_eff, tp_rr_max)
     sl, tp = sl_default, tp_default
     detail = sig.detail
     use_struct = bool(cfg.get("use_structure_sl_tp", True))
@@ -151,6 +166,12 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
     margin = size / leverage
     # 实际止损风险额（按当前止损距离）
     risk = size * abs(sig.price - sl) / sig.price if sig.price > 0 else 0.0
+    # 实际盈亏比 = 止盈距离 / 止损距离（须落在目标区间 1:2~1:5）
+    sl_dist = abs(sig.price - sl)
+    actual_rr = abs(tp - sig.price) / sl_dist if sl_dist > 0 else 0.0
+    if actual_rr and (actual_rr < tp_rr_min - 1e-9 or actual_rr > tp_rr_max + 1e-9):
+        log.warning("盈亏比区间告警: %s %s 实际 %.2fR 超出目标区间 [%.1f, %.1f]R，请检查止损/止盈设置",
+                    sig.symbol, sig.direction, actual_rr, tp_rr_min, tp_rr_max)
     pos = {
         "symbol": sym,
         "name": sig.symbol,
@@ -160,6 +181,7 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
         "entry": round(sig.price, 2),
         "sl": round(sl, 2),
         "tp": round(tp, 2),
+        "rr": round(actual_rr, 2),          # 实际目标盈亏比（1:2~1:5 区间判定）
         "initial_sl": round(sl, 2),   # 初始止损位（保本上移的基准）
         "breakeven_applied": False,    # 是否已成本上保
         "size": round(size, 2),
@@ -177,9 +199,16 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
     # 当日开仓计数 +1（单日过滤）
     state.setdefault("daily_trades", {})[today] = daily_cnt + 1
     state["last_active_date"] = today
-    log.info("模拟开仓: %s %s %s %s @%.2f sl=%.2f tp=%.2f size=%.2f %s",
+    # 胜率门槛（用户口径：方向正确率≥70%后再优化入场；复盘标准，不阻塞开仓）
+    gate_pct = float(cfg.get("winrate_gate_pct", 70.0) or 70.0)
+    wr = winrate(state)
+    if wr >= gate_pct:
+        gate_note = f"胜率{wr:.1f}%≥{gate_pct:.0f}%，门槛已达标，可进入入场优化阶段"
+    else:
+        gate_note = f"胜率{wr:.1f}%<{gate_pct:.0f}%，未达入场优化门槛，继续按当前规则积累样本"
+    log.info("模拟开仓: %s %s %s %s @%.2f sl=%.2f tp=%.2f rr=%.2fR size=%.2f %s | %s",
              pos["name"], pos["direction"], pos["strategy"], pos["level"], pos["entry"],
-             pos["sl"], pos["tp"], pos["size"], pos["detail"] or "")
+             pos["sl"], pos["tp"], pos["rr"], pos["size"], pos["detail"] or "", gate_note)
     return pos
 
 

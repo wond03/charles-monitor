@@ -35,8 +35,8 @@ class Kline:
 @dataclass
 class Signal:
     symbol: str          # BTC / 黄金
-    direction: str       # long / short
-    strategy: str        # 保底 / 归汤 / 模板 / BOS / MSS / 0.5回踩
+    direction: str       # long / short / wait（做多 / 做空 / 等待）
+    strategy: str        # 保底 / 归汤 / 模板 / BOS / MSS / 0.5回踩 / 等待
     level: str           # 1H / 15M / 4H
     price: float
     key_levels: list = field(default_factory=list)
@@ -45,7 +45,13 @@ class Signal:
     entry_type: str = ""  # 入场方式：限价委托 / 市价委托 / 条件委托 / 追踪委托
     sl_price: float = 0.0   # 结构止损位（手册条件判定）
     tp_price: float = 0.0   # 目标位（盈亏比目标）
+    rr_target: float = 0.0  # 目标盈亏比（区间上限，默认 5R；须落在 1:2~1:5 区间）
     priority: int = 99      # 条件判定优先级：越小越符合（同品种择优依据）
+
+
+# ---------- 盈亏比目标区间（用户确认口径：1:2 ~ 1:5） ----------
+RR_MIN_DEFAULT = 2.0   # 盈亏比下限：目标至少 2R 才有入场意义
+RR_MAX_DEFAULT = 5.0   # 盈亏比上限：到 TP 止盈按 5R 计算（对应手册 4.4 到TP止盈）
 
 
 # ---------- 基础工具 ----------
@@ -208,7 +214,7 @@ def detect_bos(kl: List[Kline], radius: int = 3) -> Optional[Signal]:
         sl = struct_sl_from_swings(kl, "short", radius)
         if sl:
             s.sl_price = sl
-            s.tp_price = tp_from_rr(cur.close, sl, "short", 5.0) or 0.0
+            s.tp_price = tp_from_rr(cur.close, sl, "short", RR_MAX_DEFAULT) or 0.0
         return s
     return None
 
@@ -228,7 +234,7 @@ def detect_fake_breakout(kl: List[Kline], levels: List[dict]) -> Optional[Signal
             sl = struct_sl_from_swings(kl, "short", 3)
             if sl:
                 s.sl_price = sl
-                s.tp_price = tp_from_rr(cur.close, sl, "short", 5.0) or 0.0
+                s.tp_price = tp_from_rr(cur.close, sl, "short", RR_MAX_DEFAULT) or 0.0
             return s
         # 向下假突破：最低价低于水平，但收盘收回水平上方
         if cur.low < p < cur.close and cur.low <= p * 0.9995:
@@ -273,7 +279,7 @@ def detect_mss(kl: List[Kline], radius: int = 3) -> Optional[Signal]:
             sl = struct_sl_from_swings(kl, "short", radius)
             if sl:
                 s.sl_price = sl
-                s.tp_price = tp_from_rr(cur.close, sl, "short", 5.0) or 0.0
+                s.tp_price = tp_from_rr(cur.close, sl, "short", RR_MAX_DEFAULT) or 0.0
             return s
     return None
 
@@ -330,6 +336,10 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
     radius_m15 = cfg.get("pivot_radius_m15", 5)
     cluster = cfg.get("level_cluster_pct", 0.15)
     fvg_min = cfg.get("fvg_min_pct", 0.05)
+    # 盈亏比目标区间（用户确认口径：1:2 ~ 1:5；兼容旧配置 tp_rr 单值）
+    rr_min = float(cfg.get("tp_rr_min", RR_MIN_DEFAULT))
+    rr_max = float(cfg.get("tp_rr_max", cfg.get("tp_rr", RR_MAX_DEFAULT)))
+    rr_max = max(rr_max, rr_min)
 
     # --- 1H 级别信号 ---
     h1_trend = trend_by_ma(klines_h1, h1_ma)
@@ -378,24 +388,26 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
                 s2 = Signal(symbol=symbol, direction="long", strategy="保底", level="15M",
                             price=s.price, key_levels=[lv["price"] for lv in h1_levels[:4]],
                             detail=f"1H趋势向上 + 15M {s.strategy}确认 + FVG支持；"
-                                   f"止损=1H结构下方，目标1:5（到TP止盈）"
+                                   f"止损=1H结构下方，目标1:2~1:5（到TP止盈）"
                                    f"{fib_05_note.get('long', '')}",
                             entry_type="条件委托", priority=2)
                 sl = struct_sl_from_swings(klines_h1, "long", radius_h1)
                 s2.sl_price = sl
-                s2.tp_price = tp_from_rr(s.price, sl, "long", 5.0)
+                s2.tp_price = tp_from_rr(s.price, sl, "long", rr_max)
+                s2.rr_target = rr_max
                 out.append(s2)
         elif h1_trend == "down" and s.direction == "short":
             if m15_fvg == "bear" or m15_trend == "down":
                 s2 = Signal(symbol=symbol, direction="short", strategy="保底", level="15M",
                             price=s.price, key_levels=[lv["price"] for lv in h1_levels[:4]],
                             detail=f"1H趋势向下 + 15M {s.strategy}确认 + FVG支持；"
-                                   f"止损=1H结构上方，目标1:5（到TP止盈）"
+                                   f"止损=1H结构上方，目标1:2~1:5（到TP止盈）"
                                    f"{fib_05_note.get('short', '')}",
                             entry_type="条件委托", priority=2)
                 sl = struct_sl_from_swings(klines_h1, "short", radius_h1)
                 s2.sl_price = sl
-                s2.tp_price = tp_from_rr(s.price, sl, "short", 5.0)
+                s2.tp_price = tp_from_rr(s.price, sl, "short", rr_max)
+                s2.rr_target = rr_max
                 out.append(s2)
 
     # --- 模板策略：4H 趋势 + 15M 共振 ---
@@ -408,23 +420,47 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
             s2 = Signal(symbol=symbol, direction="long", strategy="模板", level="4H+15M",
                         price=s.price, key_levels=s.key_levels,
                         detail=f"4H趋势向上 + 15M {s.strategy}共振；"
-                               f"大级别定趋势、小级别找共振；极小止损抓大结构"
+                               f"大级别定趋势、小级别找共振；极小止损抓大结构，目标1:2~1:5"
                                f"{fib_05_note.get('long', '')}",
                         entry_type="追踪委托", priority=1)
             s2.sl_price = sl15
-            s2.tp_price = tp_from_rr(s.price, sl15, "long", 5.0)
+            s2.tp_price = tp_from_rr(s.price, sl15, "long", rr_max)
+            s2.rr_target = rr_max
             out.append(s2)
         elif h4_trend == "down" and s.direction == "short":
             sl15 = struct_sl_from_swings(klines_m15, "short", radius_m15)
             s2 = Signal(symbol=symbol, direction="short", strategy="模板", level="4H+15M",
                         price=s.price, key_levels=s.key_levels,
                         detail=f"4H趋势向下 + 15M {s.strategy}共振；"
-                               f"大级别定趋势、小级别找共振；极小止损抓大结构"
+                               f"大级别定趋势、小级别找共振；极小止损抓大结构，目标1:2~1:5"
                                f"{fib_05_note.get('short', '')}",
                         entry_type="追踪委托", priority=1)
             s2.sl_price = sl15
-            s2.tp_price = tp_from_rr(s.price, sl15, "short", 5.0)
+            s2.tp_price = tp_from_rr(s.price, sl15, "short", rr_max)
+            s2.rr_target = rr_max
             out.append(s2)
+
+    # --- 1H 级结构信号（BOS/MSS/归汤）统一盈亏比目标 ---
+    # 止盈目标按区间上限 rr_max 计算（对应手册 4.4：到TP止盈），目标盈亏比须落在 1:2~1:5
+    for s in out:
+        if s.direction in ("long", "short") and s.sl_price and s.price > 0:
+            s.tp_price = tp_from_rr(s.price, s.sl_price, s.direction, rr_max)
+            s.rr_target = rr_max
+
+    # --- 等待信号：无入场信号时透出观望状态（不触发开仓，仅提醒人工等待） ---
+    if not out:
+        trend_cn = {"up": "偏多", "down": "偏空", "flat": "震荡"}.get(h1_trend, "震荡")
+        m15_note = ""
+        if m15_fvg:
+            m15_note = f"；15M 存在FVG({'看涨' if m15_fvg == 'bull' else '看跌'})，观察回踩确认"
+        wait = Signal(symbol=symbol, direction="wait", strategy="等待", level="1H+15M",
+                      price=klines_h1[-1].close if klines_h1 else 0.0,
+                      key_levels=[lv["price"] for lv in h1_levels[:2]],
+                      detail=f"当前无入场信号，等待状态；1H趋势{trend_cn}"
+                             f"{'，等待15M结构确认' if m15_note else '，等待假突破/结构破坏出现明确方向'}"
+                             f"{m15_note}；入场须满足目标盈亏比1:2~1:5",
+                      priority=99)
+        out.append(wait)
 
     # 附：1H 趋势状态（不推送，供日志）
     log.debug("[%s] 引擎扫描完成：%d 个信号 %s", symbol, len(out),

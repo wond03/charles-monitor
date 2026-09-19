@@ -193,9 +193,13 @@ def main():
              scan_cfg["scan_interval_seconds"], scan_cfg["cooldown_hours"])
     sl_pct_cfg = float(paper_cfg.get("sl_pct") or 1.0)
     sl_pct_eff = min(sl_pct_cfg, 100.0 / max(int(paper_cfg.get("leverage") or 100), 1) * 0.95)
-    log.info("模拟盘：enabled=%s，初始余额=%s，杠杆=%sx，止损=%s%%(实际生效%s%%)，止盈=%sR，结构位判定=%s",
+    tp_rr_min_cfg = float(paper_cfg.get("tp_rr_min", 2.0) or 2.0)
+    tp_rr_max_cfg = float(paper_cfg.get("tp_rr_max", paper_cfg.get("tp_rr", 5.0)) or 5.0)
+    gate_cfg = float(paper_cfg.get("winrate_gate_pct", 70.0) or 70.0)
+    log.info("模拟盘：enabled=%s，初始余额=%s，杠杆=%sx，止损=%s%%(实际生效%s%%)，目标盈亏比=%s~%sR，胜率门槛≥%s%%后优化入场，结构位判定=%s",
              paper_on, paper_cfg.get("initial_balance"), paper_cfg.get("leverage"),
-             sl_pct_cfg, round(sl_pct_eff, 4), paper_cfg.get("tp_rr"), paper_cfg.get("use_structure_sl_tp", True))
+             sl_pct_cfg, round(sl_pct_eff, 4), tp_rr_min_cfg, tp_rr_max_cfg, gate_cfg,
+             paper_cfg.get("use_structure_sl_tp", True))
 
     if scan_cfg.get("push_test_on_start") and not args.once:
         send_test(webhook)

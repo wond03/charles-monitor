@@ -47,8 +47,13 @@ def send_test(webhook: str) -> None:
 
 def format_signal(sig, extra: str = "") -> str:
     """把 Signal 对象格式化为企业微信 markdown 消息"""
-    dir_cn = "📈 看多 (long)" if sig.direction == "long" else "📉 看空 (short)"
-    if sig.direction not in ("long", "short"):
+    if sig.direction == "wait":
+        dir_cn = "⏳ 等待"
+    elif sig.direction == "long":
+        dir_cn = "📈 看多 (long)"
+    elif sig.direction == "short":
+        dir_cn = "📉 看空 (short)"
+    else:
         dir_cn = "🔍 关注"
     key_lines = ""
     if sig.key_levels:
@@ -63,11 +68,17 @@ def format_signal(sig, extra: str = "") -> str:
     if getattr(sig, "entry_type", ""):
         lines.append(f"> 入场方式：{sig.entry_type}")
     lines.append(f"> 现价：**{sig.price:.2f}**")
+    # 盈亏比目标区间（用户确认口径：1:2 ~ 1:5）
+    rr_t = getattr(sig, "rr_target", 0.0) or 0.0
+    if sig.direction in ("long", "short") and rr_t > 0:
+        lines.append(f"> 目标盈亏比：1:2 ~ 1:5（目标 **{rr_t:.1f}R**，到TP止盈）")
     if extra:
         lines.append(f"> {extra}")
     if key_lines:
         lines.append(key_lines.rstrip("\n"))
     lines.append(f"> 说明：{sig.detail}")
+    if sig.direction == "wait":
+        lines.append("> 📌 当前不满足入场条件，耐心等待结构确认，勿提前进场")
     lines.append("> ⚠️ 规则化信号仅作提醒，实盘请人工复核")
     return "\n".join(lines)
 
@@ -92,6 +103,8 @@ def _fmt_duration(seconds: float) -> str:
 def format_paper_open(pos: dict, balance: float) -> str:
     """模拟开仓消息"""
     dir_cn = "📈 看多 (long)" if pos["direction"] == "long" else "📉 看空 (short)"
+    rr = pos.get("rr", 0.0) or 0.0
+    rr_line = f"> 目标盈亏比：1:2 ~ 1:5（实际 **{rr:.1f}R**）" if rr > 0 else "> 目标盈亏比：1:2 ~ 1:5"
     return "\n".join([
         f"🟢 **模拟开仓 · {pos['name']}**",
         f"> 开仓时间：{pos.get('open_time') or time.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）",
@@ -102,6 +115,7 @@ def format_paper_open(pos: dict, balance: float) -> str:
         f"> 仓位：{pos['size']:,.0f} USDT（保证金 {pos.get('margin', 0):.2f} USDT @ {pos.get('leverage', 100)}x）",
         f"> 止损：**{pos['sl']:.2f}**",
         f"> 止盈：**{pos['tp']:.2f}**",
+        rr_line,
         "> ⚠️ 模拟单仅作练习记录，不涉及真实资金",
     ])
 

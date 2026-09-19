@@ -12,7 +12,9 @@ CFG = {
     "fee_taker": 0.0008,
     "cost_per_trade_usdt": 5,
     "sl_pct": 1.0,
-    "tp_rr": 5.0,
+    "tp_rr_min": 2.0,
+    "tp_rr_max": 5.0,
+    "winrate_gate_pct": 70,
     "max_hold_hours": 48,
     "use_structure_sl_tp": True,
 }

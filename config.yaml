@@ -49,7 +49,9 @@ engine:
 #   use_structure_sl_tp: true# 按手册条件判定止盈止损：止损=结构位、止盈=目标位/出量/趋势转换；false 时回退固定百分比
 #   breakeven_r: 3.0         # 保本保护：浮盈达单笔风险 3R → 止损移到入场价（用户确认口径）
 #   sl_pct: 1.0              # 兜底止损距离%(入场价上下)；100x杠杆爆仓线1%，固定止损取 min(1%, 0.95%)
-#   tp_rr: 5.0               # 兜底止盈 = 止损距离 × 该倍数（1%×5=5%；用户确认止盈=5R）
+#   tp_rr_min: 2.0           # 目标盈亏比区间下限：止盈目标至少 2R 才有入场意义
+#   tp_rr_max: 5.0           # 目标盈亏比区间上限：到 TP 止盈按 5R 计算（用户确认 1:2~1:5）
+#   winrate_gate_pct: 70     # 胜率门槛：方向正确率≥70% 后再优化入场（复盘标准，不阻塞开仓）
 #   max_hold_hours: 48       # 最长持仓时间，超时按市价强平
 #   max_daily_trades: 10     # 单日过滤：日内开仓最多10单（自然日北京时间计数）
 #   max_consecutive_losses: 3# 连亏过滤：连续亏损达3单暂停开仓，下个自然日自动重置
@@ -66,7 +68,9 @@ paper_trading:
   use_structure_sl_tp: true
   breakeven_r: 3.0
   sl_pct: 1.0
-  tp_rr: 5.0
+  tp_rr_min: 2.0
+  tp_rr_max: 5.0
+  winrate_gate_pct: 70
   max_hold_hours: 48
   max_daily_trades: 10
   max_consecutive_losses: 3

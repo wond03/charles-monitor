@@ -11,6 +11,8 @@
   - 止盈 = 入场价 ± 止损距离 × tp_rr（默认 5R；无结构目标位时兜底 = 0.95% × 5 = 4.75%）
   - 反向信号 → 平旧仓并反手开新仓（须级别/策略满足反手条件）
   - 超时未平 → 按市价强平（默认 48h，日内交易模式）
+  - 单日过滤：日内开仓最多 max_daily_trades 单（默认 10 单，自然日北京时间计数）
+  - 连亏过滤：连续亏损达 max_consecutive_losses 单（默认 3 单）暂停开仓，复盘后 reset_filters() 恢复
 
 状态持久化：paper_state.json（本地部署写本地文件；GitHub Actions 运行结束后
 由 monitor.py 提交回仓库，保证云端状态不丢）。
@@ -33,6 +35,8 @@ DEFAULT_STATE = {
     "open_positions": {},        # symbol -> position dict
     "closed_trades": [],         # 最近100笔已平仓记录
     "stats": {"wins": 0, "losses": 0, "pnl": 0.0},
+    "consecutive_losses": 0,     # 连续亏损单数（连亏过滤）
+    "daily_trades": {},          # {"YYYY-MM-DD": 当日开仓单数}（单日过滤）
 }
 
 
@@ -84,6 +88,19 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
     if sym in state["open_positions"]:
         return None
     if sig.direction not in ("long", "short"):
+        return None
+    # 单日过滤：日内开仓最多 max_daily_trades 单（自然日，北京时间）
+    max_daily = int(cfg.get("max_daily_trades", 10) or 10)
+    today = time.strftime("%Y-%m-%d")
+    daily_cnt = int(state.get("daily_trades", {}).get(today, 0))
+    if daily_cnt >= max_daily:
+        log.info("单日过滤: %s 当日已开 %d 单(上限 %d)，跳过开仓 %s", today, daily_cnt, max_daily, sig.symbol)
+        return None
+    # 连亏过滤：连续亏损达阈值暂停开仓，复盘后 reset_filters() 恢复
+    max_losses = int(cfg.get("max_consecutive_losses", 3) or 3)
+    if int(state.get("consecutive_losses", 0)) >= max_losses:
+        log.info("连亏过滤: 已连亏 %d 单(上限 %d)，暂停交易待复盘，跳过开仓 %s",
+                 state.get("consecutive_losses"), max_losses, sig.symbol)
         return None
     balance = state["balance"]
     leverage = int(cfg.get("leverage", 100) or 1)
@@ -144,6 +161,8 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
         "detail": detail,
     }
     state["open_positions"][sym] = pos
+    # 当日开仓计数 +1（单日过滤）
+    state.setdefault("daily_trades", {})[today] = daily_cnt + 1
     log.info("模拟开仓: %s %s %s %s @%.2f sl=%.2f tp=%.2f size=%.2f %s",
              pos["name"], pos["direction"], pos["strategy"], pos["level"], pos["entry"],
              pos["sl"], pos["tp"], pos["size"], pos["detail"] or "")
@@ -187,8 +206,10 @@ def close_position(state: dict, sym: str, price: float, reason: str, realized_pn
     state["peak_equity"] = max(state["peak_equity"], state["balance"])
     if pnl >= 0:
         state["stats"]["wins"] += 1
+        state["consecutive_losses"] = 0
     else:
         state["stats"]["losses"] += 1
+        state["consecutive_losses"] = int(state.get("consecutive_losses", 0)) + 1
     state["stats"]["pnl"] = round(state["balance"] - state["initial_balance"], 2)
     trade = {
         **pos,
@@ -204,6 +225,11 @@ def close_position(state: dict, sym: str, price: float, reason: str, realized_pn
     state["closed_trades"].append(trade)
     state["closed_trades"] = state["closed_trades"][-100:]
     return trade
+
+
+def reset_filters(state: dict) -> None:
+    """复盘后恢复交易：清零连续亏损计数（单日计数随自然日自动归零）"""
+    state["consecutive_losses"] = 0
 
 
 def _maybe_breakeven(pos: dict, price: float, cfg: dict) -> None:

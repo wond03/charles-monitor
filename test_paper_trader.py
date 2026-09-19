@@ -26,6 +26,8 @@ def _state(balance=1000.0):
         "open_positions": {},
         "closed_trades": [],
         "stats": {"pnl": 0.0, "wins": 0, "losses": 0},
+        "consecutive_losses": 0,
+        "daily_trades": {},
     }
 
 
@@ -144,6 +146,45 @@ def test_no_exit_when_flat():
     print("test_no_exit_when_flat OK")
 
 
+def test_daily_filter():
+    # 单日过滤：当日开仓数达上限后不再开仓
+    st = _state()
+    today = time.strftime("%Y-%m-%d")
+    st["daily_trades"][today] = 10
+    p = pt.open_position(st, "BTC", _sig("long", 100.0), CFG)
+    assert p is None, "单日达上限应拒绝开仓"
+    # 未达上限时正常开仓并计数
+    st2 = _state()
+    p2 = pt.open_position(st2, "BTC", _sig("long", 100.0), CFG)
+    assert p2 is not None and st2["daily_trades"][today] == 1, st2
+    print("test_daily_filter OK")
+
+
+def test_consecutive_losses_filter():
+    # 连亏过滤：连亏达3单暂停开仓；盈利清零；reset_filters 恢复
+    st = _state()
+    st["consecutive_losses"] = 3
+    p = pt.open_position(st, "BTC", _sig("long", 100.0), CFG)
+    assert p is None, "连亏达上限应暂停开仓"
+    st["consecutive_losses"] = 2
+    p = pt.open_position(st, "BTC", _sig("long", 100.0), CFG)
+    assert p is not None, "连亏2单未达上限可开仓"
+    # 盈利单清零连亏计数
+    pos = st["open_positions"]["BTC"]
+    ev = pt.manage_positions(st, {"BTC": _ctx(pos["tp"] + 0.01)}, CFG)
+    assert ev and ev[0][0] == "TP" and st["consecutive_losses"] == 0, (ev, st)
+    # 亏损单累加连亏
+    st2 = _state(); _open(st2, "long", 100.0)
+    pos2 = st2["open_positions"]["BTC"]
+    ev2 = pt.manage_positions(st2, {"BTC": _ctx(pos2["sl"] - 0.01)}, CFG)
+    assert ev2 and ev2[0][0] == "SL" and st2["consecutive_losses"] == 1, (ev2, st2)
+    # reset_filters 恢复
+    st3 = _state(); st3["consecutive_losses"] = 3
+    pt.reset_filters(st3)
+    assert st3["consecutive_losses"] == 0, st3
+    print("test_consecutive_losses_filter OK")
+
+
 if __name__ == "__main__":
     test_long_sl()
     test_long_tp()
@@ -155,4 +196,6 @@ if __name__ == "__main__":
     test_timeout()
     test_breakeven()
     test_no_exit_when_flat()
+    test_daily_filter()
+    test_consecutive_losses_filter()
     print("\n全部回归测试通过")

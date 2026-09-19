@@ -38,7 +38,6 @@ def _gate_futures_klines(inst: str, interval: str, limit: int) -> list:
             "high": float(row["h"]),
             "low": float(row["l"]),
             "close": float(row["c"]),
-            "volume": float(row.get("v") or 0),
         })
     return sorted(out, key=lambda x: x["ts"])
 
@@ -55,11 +54,10 @@ def _gate_klines(inst: str, interval: str, limit: int) -> list:
     for row in rows:
         out.append({
             "ts": int(row[0]),
-            "open": float(row[5]),
+            "open": float(row[6]),
             "high": float(row[3]),
             "low": float(row[4]),
             "close": float(row[2]),
-            "volume": float(row[6] or 0),
         })
     return sorted(out, key=lambda x: x["ts"])
 
@@ -108,7 +106,7 @@ def _weex_klines(inst: str, interval: str, limit: int) -> list:
     """Weex 现货V3 K线（公开免鉴权）。inst 形如 BTC_USDT -> symbol=BTCUSDT
     interval: 1m/5m/15m/30m/1h/2h/4h/6h/8h/12h/1d/1w，固定返回约301根
     响应为数组，索引: 0开盘时间 1开 2高 3低 4收 5量(基础币) 6收盘时间 7成交额 8笔数 9主动买量 10主动买额
-    注意：Weex 无 PAXG 等黄金交易对，仅 BTC 等常规现货可用；
+    注意：现货域无黄金交易对（PAXG/GOLD/XAUT invalid），黄金须走合约域 _weex_contract_klines；
     本环境 DNS 污染时可用环境变量 WEEX_API_IP 指定 CloudFront IP 直连兜底。
     """
     symbol = inst.replace("_", "").replace("-", "")
@@ -141,9 +139,54 @@ def _weex_klines(inst: str, interval: str, limit: int) -> list:
             "high": float(row[2]),
             "low": float(row[3]),
             "close": float(row[4]),
-            "volume": float(row[5] or 0),
         })
     return sorted(out, key=lambda x: x["ts"])
+
+
+def _weex_contract_klines(inst: str, interval: str, limit: int) -> list:
+    """Weex 合约V3 K线（公开免鉴权）。inst 形如 XAU_USDT -> symbol=XAUUSDT
+    interval: 1m/5m/15m/30m/1h/4h/12h/1d/1w
+    响应为数组，索引同现货V3: 0开盘时间 1开 2高 3低 4收 5量 6收盘时间 7成交额 ...
+    用于黄金 XAUUSDT 永续（2026-07-28 上线）等 TradFi 标的；DNS 污染同样可用 WEEX_API_IP 兜底。
+    """
+    symbol = inst.replace("_", "").replace("-", "")
+    params = {"symbol": symbol, "interval": interval, "limit": min(limit, 1000)}
+    ip = os.environ.get("WEEX_API_IP", "")
+    if ip:
+        import subprocess
+        from urllib.parse import urlencode
+        qs = urlencode(params)
+        cmd = ["curl", "-s", "--max-time", str(TIMEOUT),
+               "--resolve", f"api-contract.weex.com:443:{ip}",
+               f"https://api-contract.weex.com/capi/v3/market/klines?{qs}"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT + 5)
+        if proc.returncode != 0:
+            raise RuntimeError(f"Weex合约 curl 失败: {proc.stderr.strip() or 'exit ' + str(proc.returncode)}")
+        data = json.loads(proc.stdout)
+    else:
+        r = requests.get("https://api-contract.weex.com/capi/v3/market/klines",
+                         params=params, timeout=TIMEOUT)
+        r.raise_for_status()
+        data = r.json()
+    if isinstance(data, dict):  # 错误响应 {"code":xxx,"msg":...}
+        raise RuntimeError(f"Weex合约 {symbol} 不可用: {data.get('msg', data)}")
+    out = []
+    for row in data:
+        out.append({
+            "ts": int(row[0]),
+            "open": float(row[1]),
+            "high": float(row[2]),
+            "low": float(row[3]),
+            "close": float(row[4]),
+        })
+    return sorted(out, key=lambda x: x["ts"])
+
+
+def _weex_route(inst: str, iv: str, lim: int) -> list:
+    """Weex 源路由：黄金（XAU 开头）走合约域，其余走现货域。"""
+    if inst.upper().startswith("XAU"):
+        return _weex_contract_klines(inst, iv, lim)
+    return _weex_klines(inst, iv, lim)
 
 
 # 各交易所的 interval 映射
@@ -157,7 +200,7 @@ _INTERVAL_MAP = {
 
 _SOURCE_FUNCS = {
     "gate-futures": lambda inst, iv, lim: _gate_futures_klines(inst, iv, lim),
-    "weex": lambda inst, iv, lim: _weex_klines(inst, iv, lim),
+    "weex": _weex_route,
     "gate": lambda inst, iv, lim: _gate_klines(inst, iv, lim),
     "okx": lambda inst, iv, lim: _okx_klines(inst, iv, lim),
     "binance": lambda inst, iv, lim: _binance_klines(inst, iv, lim),

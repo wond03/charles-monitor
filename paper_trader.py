@@ -12,7 +12,7 @@
   - 反向信号 → 平旧仓并反手开新仓（须级别/策略满足反手条件）
   - 超时未平 → 按市价强平（默认 48h，日内交易模式）
   - 单日过滤：日内开仓最多 max_daily_trades 单（默认 10 单，自然日北京时间计数）
-  - 连亏过滤：连续亏损达 max_consecutive_losses 单（默认 3 单）暂停开仓，复盘后 reset_filters() 恢复
+  - 连亏过滤：连续亏损达 max_consecutive_losses 单（默认 3 单）暂停开仓，下个自然日自动重置
 
 状态持久化：paper_state.json（本地部署写本地文件；GitHub Actions 运行结束后
 由 monitor.py 提交回仓库，保证云端状态不丢）。
@@ -35,23 +35,36 @@ DEFAULT_STATE = {
     "open_positions": {},        # symbol -> position dict
     "closed_trades": [],         # 最近100笔已平仓记录
     "stats": {"wins": 0, "losses": 0, "pnl": 0.0},
-    "consecutive_losses": 0,     # 连续亏损单数（连亏过滤）
+    "consecutive_losses": 0,     # 连续亏损单数（连亏过滤，下个自然日自动重置）
     "daily_trades": {},          # {"YYYY-MM-DD": 当日开仓单数}（单日过滤）
+    "last_active_date": "",      # 上次活跃日期（用于自然日切换重置连亏/单日计数）
 }
 
 
 def load_state(state_file: str) -> dict:
-    """读取模拟账户状态，文件缺失/损坏时用默认初始状态"""
+    """读取模拟账户状态，文件缺失/损坏时用默认初始状态。
+    跨自然日（北京时间）自动重置连亏计数与单日开仓计数。"""
     if os.path.exists(state_file):
         try:
             with open(state_file, "r", encoding="utf-8") as f:
                 st = json.load(f)
             for k, v in DEFAULT_STATE.items():
                 st.setdefault(k, v)
+            _rollover_daily(st)
             return st
         except Exception:  # noqa: BLE001
             pass
     return dict(DEFAULT_STATE)
+
+
+def _rollover_daily(state: dict) -> None:
+    """自然日切换（北京时间）：连亏计数清零、单日开仓计数清空、更新活跃日期。
+    同日重复调用无副作用。"""
+    today = time.strftime("%Y-%m-%d")
+    if state.get("last_active_date") != today:
+        state["consecutive_losses"] = 0
+        state["daily_trades"] = {}
+        state["last_active_date"] = today
 
 
 def save_state(state: dict, state_file: str) -> None:
@@ -96,7 +109,7 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
     if daily_cnt >= max_daily:
         log.info("单日过滤: %s 当日已开 %d 单(上限 %d)，跳过开仓 %s", today, daily_cnt, max_daily, sig.symbol)
         return None
-    # 连亏过滤：连续亏损达阈值暂停开仓，复盘后 reset_filters() 恢复
+    # 连亏过滤：连续亏损达阈值暂停开仓，下个自然日自动重置
     max_losses = int(cfg.get("max_consecutive_losses", 3) or 3)
     if int(state.get("consecutive_losses", 0)) >= max_losses:
         log.info("连亏过滤: 已连亏 %d 单(上限 %d)，暂停交易待复盘，跳过开仓 %s",
@@ -163,6 +176,7 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
     state["open_positions"][sym] = pos
     # 当日开仓计数 +1（单日过滤）
     state.setdefault("daily_trades", {})[today] = daily_cnt + 1
+    state["last_active_date"] = today
     log.info("模拟开仓: %s %s %s %s @%.2f sl=%.2f tp=%.2f size=%.2f %s",
              pos["name"], pos["direction"], pos["strategy"], pos["level"], pos["entry"],
              pos["sl"], pos["tp"], pos["size"], pos["detail"] or "")
@@ -225,11 +239,6 @@ def close_position(state: dict, sym: str, price: float, reason: str, realized_pn
     state["closed_trades"].append(trade)
     state["closed_trades"] = state["closed_trades"][-100:]
     return trade
-
-
-def reset_filters(state: dict) -> None:
-    """复盘后恢复交易：清零连续亏损计数（单日计数随自然日自动归零）"""
-    state["consecutive_losses"] = 0
 
 
 def _maybe_breakeven(pos: dict, price: float, cfg: dict) -> None:

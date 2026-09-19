@@ -28,6 +28,7 @@ def _state(balance=1000.0):
         "stats": {"pnl": 0.0, "wins": 0, "losses": 0},
         "consecutive_losses": 0,
         "daily_trades": {},
+        "last_active_date": time.strftime("%Y-%m-%d"),
     }
 
 
@@ -161,7 +162,7 @@ def test_daily_filter():
 
 
 def test_consecutive_losses_filter():
-    # 连亏过滤：连亏达3单暂停开仓；盈利清零；reset_filters 恢复
+    # 连亏过滤：连亏达3单暂停开仓；盈利清零；下个自然日自动重置
     st = _state()
     st["consecutive_losses"] = 3
     p = pt.open_position(st, "BTC", _sig("long", 100.0), CFG)
@@ -178,10 +179,15 @@ def test_consecutive_losses_filter():
     pos2 = st2["open_positions"]["BTC"]
     ev2 = pt.manage_positions(st2, {"BTC": _ctx(pos2["sl"] - 0.01)}, CFG)
     assert ev2 and ev2[0][0] == "SL" and st2["consecutive_losses"] == 1, (ev2, st2)
-    # reset_filters 恢复
+    # 自然日切换自动重置：last_active_date 跨天后连亏清零
     st3 = _state(); st3["consecutive_losses"] = 3
-    pt.reset_filters(st3)
-    assert st3["consecutive_losses"] == 0, st3
+    st3["last_active_date"] = "2000-01-01"
+    pt._rollover_daily(st3)
+    assert st3["consecutive_losses"] == 0 and st3["last_active_date"] == time.strftime("%Y-%m-%d"), st3
+    # 同日调用无副作用
+    st3["consecutive_losses"] = 2
+    pt._rollover_daily(st3)
+    assert st3["consecutive_losses"] == 2, st3
     print("test_consecutive_losses_filter OK")
 
 

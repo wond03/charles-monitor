@@ -113,6 +113,7 @@ def format_paper_open(pos: dict, balance: float) -> str:
         f"> 策略：{pos['strategy']}（{pos['level']}）",
         f"> 入场方式：{pos.get('entry_type') or '市价委托'}",
         f"> 入场：**{pos['entry']:.2f}**",
+        f"> 保证金：{pos.get('margin', 0):.2f} USDT @ {pos.get('leverage', 100)}x",
         f"> 止损：**{pos['sl']:.2f}**",
         f"> 止盈：**{pos['tp']:.2f}**",
         "> ⚠️ 模拟单仅作练习记录，不涉及真实资金",

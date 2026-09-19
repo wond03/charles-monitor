@@ -413,7 +413,9 @@
     "losses": 5,
     "pnl": 2.21
   },
-  "consecutive_losses": 0,
-  "daily_trades": {},
-  "last_active_date": "2026-09-20"
+  "consecutive_losses": 1,
+  "daily_trades": {
+    "2026-09-19": 1
+  },
+  "last_active_date": "2026-09-19"
 }

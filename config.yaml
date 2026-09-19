@@ -25,11 +25,7 @@ symbols:
     enabled: true
     name: "黄金永续(XAU)"
     inst: "XAU_USDT"          # Gate 直接跟踪伦敦金 XAU 价格的永续合约（替代原 PAXG 代理）
-<<<<<<< ours
     exchange: "gate-futures,weex"  # 纯永续链：gate-futures永续主源，Weex合约域XAUUSDT永续备援
-=======
-    exchange: "gate-futures,weex,gate,okx,binance"  # Weex 合约域有 XAUUSDT 永续（2026-07-28上线），第二备援
->>>>>>> theirs
     min_move_pct: 0.10
 
 # 信号引擎参数

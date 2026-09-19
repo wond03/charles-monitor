@@ -2,13 +2,8 @@
 
 基于《查尔斯交易实操手册》策略规则（保底策略 / 归汤策略 / 交易模板）的自动化信号监控 + 企业微信推送系统。
 
-<<<<<<< ours
 监控对象：**BTC**（BTC/USDT）与 **黄金**（XAU/USDT 永续，Gate 直接跟踪伦敦金 XAU 价格，替代原 PAXG 代理）。
 数据源：Gate.io 永续合约 K 线（主，贴近实际交易标的，国内可直连）、Weex 合约 V3（备，BTCUSDT / XAUUSDT 永续，公开免鉴权）。OKX / Binance / Gate 现货已按用户要求废除。优先级由 config.yaml 各标的下 exchange 字段控制（逗号分隔，首个为主源）。
-=======
-监控对象：**BTC**（BTC/USDT）与 **黄金**（XAU/USDT 永续，Gate 直接跟踪伦敦金 XAU 价格，替代原 PAXG 代理）。
-数据源：Gate.io 永续合约 K 线（主，贴近实际交易标的，国内可直连）、Weex 现货 V3（公开免鉴权，BTC 备援）、Weex 合约 V3（公开免鉴权，黄金 XAUUSDT 永续备援，2026-07-28 上线）、Gate.io 现货 / OKX / Binance（自动备援）。优先级由 config.yaml 各标的下 exchange 字段控制（逗号分隔，首个为主源）。
->>>>>>> theirs
 
 ---
 

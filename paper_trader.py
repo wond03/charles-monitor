@@ -271,19 +271,33 @@ def close_position(state: dict, sym: str, price: float, reason: str, realized_pn
 
 
 def _maybe_breakeven(pos: dict, price: float, cfg: dict) -> None:
-    """保本保护（手册 4.3 + 用户确认口径）：
-    - 浮盈 >= 单笔风险 × breakeven_r（默认 3R；R=该单止损距离对应风险金额）→ 止损移到入场价（保本）
+    """锁盈保护（手册 4.3 + 用户确认口径）：
+    - 浮盈 >= 单笔风险 × breakeven_r（默认 3R；R=该单止损距离对应风险金额）→ 锁利润
+    - 锁盈位置 = 入场价 ± lock_profit_r × 初始止损距离（默认锁 2R，即 3R 时锁定 2R 利润）
+    - 1:5 直接止盈由 TP 判定（止盈目标 5R）
     """
     risk = float(pos.get("risk", 0) or 0)
     if risk <= 0:
         return
     pnl = mark_price(pos, price)
     r_mult = float(cfg.get("breakeven_r", 3.0) or 3.0)
+    lock_r = float(cfg.get("lock_profit_r", 2.0) or 2.0)
     if not pos.get("breakeven_applied") and pnl >= risk * r_mult:
-        pos["sl"] = pos["entry"]
+        sl_dist = abs(float(pos.get("entry") or 0) - float(pos.get("initial_sl") or 0))
+        lock_dist = sl_dist * lock_r
+        direction = pos.get("direction")
+        if direction == "long":
+            new_sl = pos["entry"] + lock_dist
+            if sl_dist > 0 and new_sl > float(pos.get("sl") or 0):
+                pos["sl"] = round(new_sl, 2)
+        else:
+            new_sl = pos["entry"] - lock_dist
+            if sl_dist > 0 and new_sl < float(pos.get("sl") or 0):
+                pos["sl"] = round(new_sl, 2)
         pos["breakeven_applied"] = True
-        log.info("保本上移: %s %s 浮盈 %.2f >= 风险%.2f×%.1f=%.2f，止损移至入场价 %.2f",
-                 pos["name"], pos["direction"], pnl, risk, r_mult, risk * r_mult, pos["entry"])
+        log.info("锁盈上移: %s %s 浮盈 %.2f >= 风险%.2f×%.1f=%.2f，止损移至入场价%+.2f（锁 %.1fR）",
+                 pos["name"], pos["direction"], pnl, risk, r_mult, risk * r_mult,
+                 pos["sl"] - pos["entry"], lock_r)
 
 
 def manage_positions(state: dict, ctxs: dict, cfg: dict) -> list:

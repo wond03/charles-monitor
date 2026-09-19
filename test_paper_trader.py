@@ -17,6 +17,8 @@ CFG = {
     "winrate_gate_pct": 70,
     "max_hold_hours": 48,
     "use_structure_sl_tp": True,
+    "breakeven_r": 3.0,
+    "lock_profit_r": 2.0,
 }
 
 
@@ -132,12 +134,14 @@ def test_breakeven():
     st = _state(); _open(st, "long", 100.0)
     pos = st["open_positions"]["BTC"]
     risk = pos["risk"]
-    # 浮盈 >= 3R 时止损上移入场价（略超阈值，避免浮点边界）
+    # 浮盈 >= 3R 时锁盈：止损上移入场价 + lock_profit_r×初始止损距离（锁 2R，略超阈值避免浮点边界）
     target = pos["entry"] + (risk * 3.0) / pos["size"] * pos["entry"] * 1.001
     ev = pt.manage_positions(st, {"BTC": _ctx(target)}, CFG)
     assert not ev, ev
     pos2 = st["open_positions"]["BTC"]
-    assert pos2["breakeven_applied"] and pos2["sl"] == pos2["entry"], pos2
+    sl_dist = abs(pos2["entry"] - pos2["initial_sl"])
+    expect_sl = round(pos2["entry"] + 2.0 * sl_dist, 2)
+    assert pos2["breakeven_applied"] and pos2["sl"] == expect_sl, pos2
     print("test_breakeven OK")
 
 

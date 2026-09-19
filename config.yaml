@@ -47,7 +47,8 @@ engine:
 #   leverage: 100            # 杠杆倍数（100x：价格反向波动1%即爆仓）
 #   risk_per_trade_pct: 1.0  # 每笔风险占余额%(对应手册：单笔风控1%)
 #   use_structure_sl_tp: true# 按手册条件判定止盈止损：止损=结构位、止盈=目标位/出量/趋势转换；false 时回退固定百分比
-#   breakeven_r: 3.0         # 保本保护：浮盈达单笔风险 3R → 止损移到入场价（用户确认口径）
+#   breakeven_r: 3.0         # 锁盈触发阈值：浮盈达单笔风险 3R 时锁利润（用户确认口径：1:3 锁利润）
+#   lock_profit_r: 2.0       # 锁盈位置 = 入场价 ± 2R 初始止损距离（锁定 2R 利润，用户确认）
 #   sl_pct: 1.0              # 兜底止损距离%(入场价上下)；100x杠杆爆仓线1%，固定止损取 min(1%, 0.95%)
 #   tp_rr_min: 2.0           # 目标盈亏比区间下限：止盈目标至少 2R 才有入场意义
 #   tp_rr_max: 5.0           # 目标盈亏比区间上限：到 TP 止盈按 5R 计算（用户确认 1:2~1:5）
@@ -67,6 +68,7 @@ paper_trading:
   risk_per_trade_pct: 1.0
   use_structure_sl_tp: true
   breakeven_r: 3.0
+  lock_profit_r: 2.0
   sl_pct: 1.0
   tp_rr_min: 2.0
   tp_rr_max: 5.0

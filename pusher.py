@@ -42,18 +42,13 @@ def send_wecom(webhook: str, content: str, msgtype: str = "markdown") -> bool:
 
 def send_test(webhook: str) -> None:
     """发送测试消息"""
-    send_wecom(webhook, "✅ 查尔斯信号监控系统已启动！\n> 监控标的：BTC / XAU\n> 策略：保底 / 归汤 / 模板\n> 信号命中后将实时推送提醒")
+    send_wecom(webhook, "✅ 查尔斯信号监控系统已启动！\n> 监控标的：BTC / 黄金(PAXG)\n> 策略：保底 / 归汤 / 模板\n> 信号命中后将实时推送提醒")
 
 
 def format_signal(sig, extra: str = "") -> str:
     """把 Signal 对象格式化为企业微信 markdown 消息"""
-    if sig.direction == "wait":
-        dir_cn = "⏳ 等待"
-    elif sig.direction == "long":
-        dir_cn = "📈 看多 (long)"
-    elif sig.direction == "short":
-        dir_cn = "📉 看空 (short)"
-    else:
+    dir_cn = "📈 看多 (long)" if sig.direction == "long" else "📉 看空 (short)"
+    if sig.direction not in ("long", "short"):
         dir_cn = "🔍 关注"
     key_lines = ""
     if sig.key_levels:
@@ -68,19 +63,27 @@ def format_signal(sig, extra: str = "") -> str:
     if getattr(sig, "entry_type", ""):
         lines.append(f"> 入场方式：{sig.entry_type}")
     lines.append(f"> 现价：**{sig.price:.2f}**")
-    # 盈亏比目标区间（用户确认口径：1:2 ~ 1:5）
-    rr_t = getattr(sig, "rr_target", 0.0) or 0.0
-    if sig.direction in ("long", "short") and rr_t > 0:
-        lines.append(f"> 目标盈亏比：1:2 ~ 1:5（目标 **{rr_t:.1f}R**，到TP止盈）")
     if extra:
         lines.append(f"> {extra}")
     if key_lines:
         lines.append(key_lines.rstrip("\n"))
     lines.append(f"> 说明：{sig.detail}")
-    if sig.direction == "wait":
-        lines.append("> 📌 当前不满足入场条件，耐心等待结构确认，勿提前进场")
     lines.append("> ⚠️ 规则化信号仅作提醒，实盘请人工复核")
     return "\n".join(lines)
+
+
+def _calc_rr(pos: dict) -> float:
+    """计算盈亏比 = 止盈距离 / 止损距离（按方向取正距离）"""
+    direction = pos.get("direction", "long")
+    if direction == "short":
+        tp_dist = pos["entry"] - pos["tp"]
+        sl_dist = pos["sl"] - pos["entry"]
+    else:
+        tp_dist = pos["tp"] - pos["entry"]
+        sl_dist = pos["entry"] - pos["sl"]
+    if sl_dist <= 0:
+        return 0.0
+    return tp_dist / sl_dist
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -103,8 +106,6 @@ def _fmt_duration(seconds: float) -> str:
 def format_paper_open(pos: dict, balance: float) -> str:
     """模拟开仓消息"""
     dir_cn = "📈 看多 (long)" if pos["direction"] == "long" else "📉 看空 (short)"
-    rr = pos.get("rr", 0.0) or 0.0
-    rr_line = f"> 目标盈亏比：1:2 ~ 1:5（实际 **{rr:.1f}R**）" if rr > 0 else "> 目标盈亏比：1:2 ~ 1:5"
     return "\n".join([
         f"🟢 **模拟开仓 · {pos['name']}**",
         f"> 开仓时间：{pos.get('open_time') or time.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）",
@@ -112,10 +113,8 @@ def format_paper_open(pos: dict, balance: float) -> str:
         f"> 策略：{pos['strategy']}（{pos['level']}）",
         f"> 入场方式：{pos.get('entry_type') or '市价委托'}",
         f"> 入场：**{pos['entry']:.2f}**",
-        f"> 仓位：{pos['size']:,.0f} USDT（保证金 {pos.get('margin', 0):.2f} USDT @ {pos.get('leverage', 100)}x）",
         f"> 止损：**{pos['sl']:.2f}**",
         f"> 止盈：**{pos['tp']:.2f}**",
-        rr_line,
         "> ⚠️ 模拟单仅作练习记录，不涉及真实资金",
     ])
 
@@ -136,6 +135,20 @@ def format_paper_close(kind: str, trade: dict, balance: float) -> str:
         f"> 盈亏：**{arrow}{trade['pnl']:.2f} USDT**（{arrow}{trade['pnl_pct']:.2f}%）",
         f"> 模拟余额：**{balance:,.2f} USDT**",
     ])
+
+
+def format_paper_status(state: dict) -> str:
+    """模拟账户状态（附在信号推送末尾，当存在持仓时）"""
+    stats = state["stats"]
+    now_str = time.strftime("%Y-%m-%d %H:%M:%S")
+    lines = [
+        f"📊 **模拟账户**（{now_str} 北京时间）：余额 **{state['balance']:,.2f} USDT**",
+        f"> 累计盈亏：{stats['pnl']:+.2f}（胜 {stats['wins']} / 负 {stats['losses']}）",
+    ]
+    for sym, pos in state["open_positions"].items():
+        dir_cn = "多" if pos["direction"] == "long" else "空"
+        lines.append(f"> 持仓：{pos['name']} {dir_cn} @ {pos['entry']:.2f}（{pos['strategy']}，开仓 {pos.get('open_time', '-')}）")
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

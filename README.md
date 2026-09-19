@@ -2,8 +2,8 @@
 
 基于《查尔斯交易实操手册》策略规则（保底策略 / 归汤策略 / 交易模板）的自动化信号监控 + 企业微信推送系统。
 
-监控对象：**BTC**（BTC/USDT）与 **黄金**（PAXG/USDT 代理，PAXG 严格锚定黄金 1:1 盎司，走势与伦敦金一致）。
-数据源：Gate.io 永续合约 K 线（主，贴近实际交易标的，国内可直连）、Weex 现货 V3（公开免鉴权，仅 BTC 可用）、Gate.io 现货 / OKX / Binance（自动备援）。优先级由 config.yaml 各标的下 exchange 字段控制（逗号分隔，首个为主源）。
+监控对象：**BTC**（BTC/USDT）与 **黄金**（XAU/USDT 永续，Gate 直接跟踪伦敦金 XAU 价格，替代原 PAXG 代理）。
+数据源：Gate.io 永续合约 K 线（主，贴近实际交易标的，国内可直连）、Weex 现货 V3（公开免鉴权，BTC 备援）、Weex 合约 V3（公开免鉴权，黄金 XAUUSDT 永续备援，2026-07-28 上线）、Gate.io 现货 / OKX / Binance（自动备援）。优先级由 config.yaml 各标的下 exchange 字段控制（逗号分隔，首个为主源）。
 
 ---
 
@@ -121,13 +121,7 @@ systemctl daemon-reload && systemctl enable --now charles-monitor
 - 模拟账户状态保存在 `paper_state.json`，GitHub Actions 云端运行会自动提交回仓库，状态不丢；
 - 推送消息中会附带模拟账户余额、保证金与持仓，方便手机查看。
 
-## 六、日志与排障
-
-- 日志统一写入 `logs/monitor.log`（2MB 轮转，保留 5 个备份），同时输出到控制台；GitHub Actions 运行日志在仓库 Actions 页可见；
-- 时间统一北京时间；级别默认 INFO，可用 `CHARLES_LOG_LEVEL=DEBUG` 环境变量或 `--log-level DEBUG` 调细；
-- 关键日志点：启动配置摘要、各数据源成功/失败与备援切换、信号推送、模拟开/平仓（含原因与盈亏）、保本/锁利上移、扫描异常（含完整堆栈）。
-
-## 七、风险提示
+## 六、风险提示
 
 - 本系统为规则化辅助提醒工具，信号质量取决于策略参数与市场环境；
 - 手册要求所有策略**先回测半年以上再实盘**；

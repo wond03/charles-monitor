@@ -122,7 +122,7 @@ class _ReportPDF(_FPDF):
         self.cell(0, 5, "模拟单仅作练习记录，不涉及真实资金", align="C")
 
 
-def build_pdf_report(state: dict, trades: list, period: str, now_str: str, out_path: str):
+def build_pdf_report(state: dict, trades: list, period: str, now_str: str, out_path: str, signals: list = None):
     """用 fpdf2 矢量排版生成综合报表 PDF：文字/表格/折线均为原生矢量，
     不经过位图，彻底解决模糊与遮挡问题。"""
     if not _HAS_FPDF:
@@ -333,10 +333,30 @@ def build_pdf_report(state: dict, trades: list, period: str, now_str: str, out_p
         pdf.cell(0, 6, label)
         y += 8.0
 
-    # 五、平仓原因
+    # 五、信号统计（台账）
+    signals = signals or []
+    if signals:
+        section("五、信号统计（台账）")
+        by_sig = signal_stat_by_strategy(signals)
+        by_trade = stat_by_strategy(trades)
+        for k, g in by_sig.items():
+            ensure(8.0)
+            if g["n"] == 0:
+                continue
+            pdf.set_xy(_PDF_MARGIN + 4, y)
+            pdf.set_font("NotoCJK", "", 16)
+            set_text("#334155")
+            t = by_trade.get(k) or {"n": 0, "wins": 0, "losses": 0, "pnl": 0.0, "win_rate": 0.0}
+            conv = g["pushed"] / g["n"] * 100 if g["n"] else 0.0
+            label = (f"{k}  信号{g['n']}条/推{g['pushed']}条  开仓{t['n']}笔  "
+                     f"转化率{conv:.0f}%  胜率{t['win_rate']:.0f}%  盈亏{t['pnl']:+.2f}")
+            pdf.cell(0, 6, label)
+            y += 8.0
+
+    # 六、平仓原因
     by_reason = stat_by(trades, "reason")
     if by_reason:
-        section("五、平仓原因")
+        section("六、平仓原因")
         reason_cn = {"TP": "止盈", "SL": "止损", "TIMEOUT": "超时强平", "REVERSE": "反向平仓", "LIQ": "爆仓"}
         for k, g in by_reason.items():
             ensure(8.0)
@@ -346,8 +366,8 @@ def build_pdf_report(state: dict, trades: list, period: str, now_str: str, out_p
             pdf.cell(0, 6, f"{reason_cn.get(k, k)}  {g['n']}笔")
             y += 8.0
 
-    # 六、交易明细（矢量表格，跨页重绘表头）
-    section("六、交易明细")
+    # 七、交易明细（矢量表格，跨页重绘表头）
+    section("七、交易明细")
     if trades:
         headers = ["平仓时间(北京)", "品种", "方向", "策略", "原因", "入场", "出场", "盈亏"]
         col_w = [28, 27, 10, 19, 33, 24, 24, 21]
@@ -408,7 +428,7 @@ def build_pdf_report(state: dict, trades: list, period: str, now_str: str, out_p
     return out_path
 
 
-def build_chart_image(state: dict, trades: list, period: str, now_str: str, out_path: str):
+def build_chart_image(state: dict, trades: list, period: str, now_str: str, out_path: str, signals: list = None):
     """用 Pillow 生成综合报表 PNG/PDF：账户概览/交易统计/权益曲线/策略/原因/交易明细。
     PDF 模式按页流式分页（PAGE_H 上限自动换页），画布 1600 宽保证手机端清晰。"""
     if not _HAS_PIL:
@@ -570,18 +590,35 @@ def build_chart_image(state: dict, trades: list, period: str, now_str: str, out_
         d.text((80, y), label, font=font_n, fill="#334155")
         y += 59
 
-    # 五、平仓原因
+    # 五、信号统计（台账）
+    signals = signals or []
+    if signals:
+        section("五、信号统计（台账）")
+        by_sig = signal_stat_by_strategy(signals)
+        by_trade = stat_by_strategy(trades)
+        for k, g in by_sig.items():
+            ensure_space(59)
+            if g["n"] == 0:
+                continue
+            t = by_trade.get(k) or {"n": 0, "wins": 0, "losses": 0, "pnl": 0.0, "win_rate": 0.0}
+            conv = g["pushed"] / g["n"] * 100 if g["n"] else 0.0
+            label = (f"{k}  信号{g['n']}条/推{g['pushed']}条  开仓{t['n']}笔  "
+                     f"转化率{conv:.0f}%  胜率{t['win_rate']:.0f}%  盈亏{t['pnl']:+.2f}")
+            d.text((80, y), label, font=font_n, fill="#334155")
+            y += 59
+
+    # 六、平仓原因
     by_reason = stat_by(trades, "reason")
     if by_reason:
-        section("五、平仓原因")
+        section("六、平仓原因")
         reason_cn = {"TP": "止盈", "SL": "止损", "TIMEOUT": "超时强平", "REVERSE": "反向平仓", "LIQ": "爆仓"}
         for k, g in by_reason.items():
             ensure_space(59)
             d.text((80, y), f"{reason_cn.get(k, k)}  {g['n']}笔", font=font_n, fill="#334155")
             y += 59
 
-    # 六、交易明细
-    section("六、交易明细")
+    # 七、交易明细
+    section("七、交易明细")
     if trades:
         headers = ["平仓时间(北京)", "品种", "方向", "策略", "原因", "入场→出场", "盈亏"]
         widths = [267, 227, 93, 120, 160, 480, 120]
@@ -693,7 +730,38 @@ def stat_by_strategy(trades: list) -> dict:
     return out
 
 
-def build_report(state: dict, trades: list, period: str, now_str: str) -> str:
+def load_signal_log(path: str = "signal_log.json") -> list:
+    """读取信号台账（monitor.py 每轮扫描落盘的信号记录），异常返回空列表"""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            logs = json.load(f)
+        return logs if isinstance(logs, list) else []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def filter_signals(signals: list, period: str) -> list:
+    """按统计区间过滤信号（以信号发出时间 ts 计，北京时间）"""
+    hours = PERIOD_HOURS[period]
+    if hours is None:
+        return list(signals)
+    cutoff = time.time() - hours * 3600
+    return [s for s in signals if s.get("ts", 0) >= cutoff]
+
+
+def signal_stat_by_strategy(signals: list) -> dict:
+    """按 6 类信号口径统计信号台账：{策略: {n: 信号总数, pushed: 实际推送数}}"""
+    groups = {k: {"n": 0, "pushed": 0} for k in SIGNAL_STRATEGIES}
+    for s in signals:
+        k = s.get("strategy", "未知")
+        groups.setdefault(k, {"n": 0, "pushed": 0})
+        groups[k]["n"] += 1
+        if s.get("pushed", False):
+            groups[k]["pushed"] += 1
+    return groups
+
+
+def build_report(state: dict, trades: list, period: str, now_str: str, signals: list = None) -> str:
     initial = state.get("initial_balance", 100.0)
     balance = state.get("balance", initial)
     total_pnl = state.get("stats", {}).get("pnl", balance - initial)
@@ -758,9 +826,27 @@ def build_report(state: dict, trades: list, period: str, now_str: str) -> str:
                 L.append(f"| {k} | {g['n']} | {g['wins']}/{g['losses']} | {g['win_rate']:.1f}% | {g['pnl']:+.2f} | {g['avg']:+.2f} |")
         L.append("")
 
+    signals = signals or []
+    if signals:
+        by_sig = signal_stat_by_strategy(signals)
+        by_trade = stat_by_strategy(trades)
+        L += ["## 四、信号统计（台账）", "",
+              "> 口径：信号数=扫描命中数；推送数=冷却放行数；开仓数/胜率/盈亏取自已平仓交易", "",
+              "| 策略 | 信号数 | 推送数 | 开仓数 | 转化率 | 胜率 | 盈亏 |",
+              "|------|-------|-------|-------|-------|------|------|"]
+        for k, g in by_sig.items():
+            t = by_trade.get(k) or {"n": 0, "wins": 0, "losses": 0, "pnl": 0.0, "win_rate": 0.0}
+            conv = g["pushed"] / g["n"] * 100 if g["n"] else 0.0
+            wr = t["win_rate"] if t["n"] else 0.0
+            if g["n"] == 0 and t["n"] == 0:
+                L.append(f"| {k} | 0 | 0 | 0 | - | - | - |")
+            else:
+                L.append(f"| {k} | {g['n']} | {g['pushed']} | {t['n']} | {conv:.0f}% | {wr:.1f}% | {t['pnl']:+.2f} |")
+        L.append("")
+
     by_symbol = stat_by(trades, "name")
     if by_symbol:
-        L += ["## 四、按品种分布", "", "| 品种 | 笔数 | 胜/负 | 胜率 | 盈亏合计 |", "|------|-----|-------|------|---------|"]
+        L += ["## 五、按品种分布", "", "| 品种 | 笔数 | 胜/负 | 胜率 | 盈亏合计 |", "|------|-----|-------|------|---------|"]
         for k, g in by_symbol.items():
             L.append(f"| {k} | {g['n']} | {g['wins']}/{g['losses']} | {g['win_rate']:.1f}% | {g['pnl']:+.2f} |")
         L.append("")
@@ -768,13 +854,13 @@ def build_report(state: dict, trades: list, period: str, now_str: str) -> str:
     by_reason = stat_by(trades, "reason")
     if by_reason:
         reason_cn = {"TP": "止盈", "SL": "止损", "TIMEOUT": "超时强平", "REVERSE": "反向平仓", "LIQ": "爆仓"}
-        L += ["## 五、按平仓原因分布", "", "| 原因 | 笔数 | 胜/负 | 胜率 | 盈亏合计 |", "|------|-----|-------|------|---------|"]
+        L += ["## 六、按平仓原因分布", "", "| 原因 | 笔数 | 胜/负 | 胜率 | 盈亏合计 |", "|------|-----|-------|------|---------|"]
         for k, g in by_reason.items():
             L.append(f"| {reason_cn.get(k, k)} | {g['n']} | {g['wins']}/{g['losses']} | {g['win_rate']:.1f}% | {g['pnl']:+.2f} |")
         L.append("")
 
     if trades:
-        L += ["## 六、最近交易明细", "", "| 平仓时间(北京) | 品种 | 方向 | 策略 | 原因 | 入场→出场 | 盈亏 |", "|------|------|------|------|------|-----------|------|"]
+        L += ["## 七、最近交易明细", "", "| 平仓时间(北京) | 品种 | 方向 | 策略 | 原因 | 入场→出场 | 盈亏 |", "|------|------|------|------|------|-----------|------|"]
         for t in reversed(trades[-10:]):
             d = "多" if t.get("direction") == "long" else "空"
             rc = {"TP": "止盈", "SL": "止损", "TIMEOUT": "超时强平", "REVERSE": "反向平仓", "LIQ": "爆仓"}.get(t.get("reason", ""), t.get("reason", ""))
@@ -805,7 +891,7 @@ def load_webhook(cli_webhook: str = "", config_path: str = "config.yaml") -> str
     return ""
 
 
-def build_push_text(state: dict, trades: list, period: str, now_str: str) -> str:
+def build_push_text(state: dict, trades: list, period: str, now_str: str, signals: list = None) -> str:
     """生成企业微信 markdown 推送文本（企微不支持表格，用简洁行；超长截断）"""
     initial = state.get("initial_balance", 100.0)
     balance = state.get("balance", initial)
@@ -857,6 +943,17 @@ def build_push_text(state: dict, trades: list, period: str, now_str: str) -> str
             parts = " | ".join(f"{reason_cn.get(k, k)} {g['n']}笔" for k, g in list(by_reason.items())[:5])
             L.append(f"**平仓原因**：{parts}")
             L.append("")
+
+    signals = signals or []
+    if signals:
+        by_sig = signal_stat_by_strategy(signals)
+        total_n = sum(g["n"] for g in by_sig.values())
+        total_p = sum(g["pushed"] for g in by_sig.values())
+        L.append(f"**信号台账（{total_n} 条 / 推送 {total_p} 条）**：")
+        for k, g in by_sig.items():
+            if g["n"]:
+                L.append(f"> {k}：{g['n']}条（推{g['pushed']}）")
+        L.append("")
 
     L.append("> ⚠️ 模拟单仅作练习记录，不涉及真实资金")
 
@@ -916,10 +1013,12 @@ def main():
 
     state = load_state(args.state)
     trades = filter_trades(state.get("closed_trades", []), args.period)
+    # 信号台账（monitor.py 落盘）：按统计区间过滤，无台账文件则跳过信号统计
+    signals = filter_signals(load_signal_log("signal_log.json"), args.period)
     # 标题时间使用北京时间（UTC+8）
     bj_time = time.gmtime(time.time() + 8 * 3600)
     now_str = time.strftime("%Y-%m-%d %H:%M", bj_time)
-    report = build_report(state, trades, args.period, now_str)
+    report = build_report(state, trades, args.period, now_str, signals)
     if args.output:
         with open(args.output, "w", encoding="utf-8") as f:
             f.write(report)
@@ -927,7 +1026,7 @@ def main():
     if args.image:
         webhook = load_webhook(args.webhook)
         img_path = args.output + ".png" if args.output else f"report_{args.period}_{time.strftime('%Y%m%d')}.png"
-        build_chart_image(state, trades, args.period, now_str, img_path)
+        build_chart_image(state, trades, args.period, now_str, img_path, signals)
         send_wecom_image(webhook, img_path)
         print(f"已生成图表并推送: {img_path}")
     if args.pdf:
@@ -946,7 +1045,7 @@ def main():
             period_cn = {"weekly": "周报", "monthly": "月报", "all": "总览"}[args.period]
             pdf_path = f"{period_cn}{label}.pdf"
         # PDF 由 fpdf2 矢量排版输出（原生矢量，手机端不模糊不遮挡）
-        build_pdf_report(state, trades, args.period, now_str, pdf_path)
+        build_pdf_report(state, trades, args.period, now_str, pdf_path, signals)
         send_wecom_image(webhook, pdf_path)
         print(f"已生成 PDF 并推送: {pdf_path}")
     if not args.output and not args.image and not args.pdf:
@@ -955,3 +1054,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

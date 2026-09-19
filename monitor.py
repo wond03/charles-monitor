@@ -38,6 +38,9 @@ import paper_trader
 REVERSE_STRATEGIES = ("模板", "保底", "BOS", "MSS", "归汤")
 # 级别权重：数值越大级别越高（反手要求反向信号级别 >= 持仓级别）
 LEVEL_RANK = {"15M": 1, "1H": 2, "4H+15M": 3, "1H+15M": 3, "4H": 4}
+# 信号台账：每次扫描全部信号落盘（含冷却跳过未推送的），供周报统计正确率
+SIGNAL_LOG_FILE = "signal_log.json"
+SIGNAL_LOG_KEEP_DAYS = 30  # 台账只保留最近 30 天，防无限膨胀
 
 
 def _level_rank_of(sig_or_pos) -> int:
@@ -127,6 +130,25 @@ def save_cooldown(cooldown: dict, path: str) -> None:
             json.dump(cooldown, f, ensure_ascii=False)
     except Exception as e:  # noqa: BLE001
         log.warning("冷却状态保存失败: %s", e)
+
+
+def append_signal_log(entries: list, path: str = SIGNAL_LOG_FILE) -> None:
+    """信号台账落盘：追加本轮全部信号记录，只保留最近 SIGNAL_LOG_KEEP_DAYS 天"""
+    try:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                logs = json.load(f)
+        except Exception:  # noqa: BLE001
+            logs = []
+        if not isinstance(logs, list):
+            logs = []
+        logs.extend(entries)
+        cutoff = time.time() - SIGNAL_LOG_KEEP_DAYS * 86400
+        logs = [e for e in logs if isinstance(e, dict) and e.get("ts", 0) >= cutoff]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(logs, f, ensure_ascii=False)
+    except Exception as e:  # noqa: BLE001
+        log.warning("信号台账保存失败: %s", e)
 
 
 def _paper_on_signal(state: dict, sym_key: str, sig, paper_cfg: dict, webhook: str) -> None:
@@ -229,20 +251,39 @@ def main():
                 log.debug("[%s] 扫描结果：%d 个信号，h4_trend=%s，vol_surge=%s，price=%.2f",
                           sym_cfg["name"], len(res["signals"]), res["h4_trend"],
                           res["vol_surge"], res["price"])
+                signal_log_entries = []
                 for sig, extra, price in res["signals"]:
                     prices[key] = price
                     ckey = ":".join([sig.symbol, sig.strategy, sig.direction, sig.level])
                     now = time.time()
                     rec = cooldown.get(ckey)
+                    skipped = False
                     if rec:
                         age = now - rec.get("ts", 0)
                         last_price = rec.get("price", 0)
                         # 冷却期内：价格未明显移动则跳过；价格显著变动视为新机会放行
                         price_drift = abs(price - last_price) / last_price * 100 if last_price else 0
                         if age < cool_sec and price_drift < price_rearm_pct:
+                            skipped = True
                             log.debug("冷却跳过：%s（age=%.0fs < %ss, drift=%.3f%%）",
                                       ckey, age, cool_sec, price_drift)
-                            continue
+                    # 台账：全部信号落盘（含冷却跳过的），pushed 标记是否实际推送
+                    signal_log_entries.append({
+                        "ts": int(now),
+                        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "symbol": sig.symbol,
+                        "strategy": sig.strategy,
+                        "direction": sig.direction,
+                        "level": sig.level,
+                        "price": sig.price,
+                        "sl_price": getattr(sig, "sl_price", 0.0),
+                        "tp_price": getattr(sig, "tp_price", 0.0),
+                        "rr_target": getattr(sig, "rr_target", 0.0),
+                        "priority": getattr(sig, "priority", 99),
+                        "pushed": not skipped,
+                    })
+                    if skipped:
+                        continue
                     cooldown[ckey] = {"ts": now, "price": price}
                     try:
                         send_wecom(webhook, format_signal(sig, extra))
@@ -253,6 +294,8 @@ def main():
                     # 模拟单：信号命中即自动开仓（反向持仓先平）
                     if paper_on and paper_cfg:
                         _paper_on_signal(state, key, sig, paper_cfg, webhook)
+                if signal_log_entries:
+                    append_signal_log(signal_log_entries, SIGNAL_LOG_FILE)
 
             if paper_on and paper_cfg:
                 # 管理持仓：止盈/止损/超时/出量/趋势转换，触发即推送
@@ -264,10 +307,10 @@ def main():
                         log.error("平仓推送失败: %s", e, exc_info=True)
                 paper_trader.save_state(state, state_file)
                 save_cooldown(cooldown, cooldown_file)
-                commit_paper_state(state_file, extra_files=[cooldown_file])
+                commit_paper_state(state_file, extra_files=[cooldown_file, SIGNAL_LOG_FILE])
             else:
                 save_cooldown(cooldown, cooldown_file)
-                commit_paper_state(cooldown_file, extra_files=[])
+                commit_paper_state(cooldown_file, extra_files=[SIGNAL_LOG_FILE])
             log.info("本轮扫描完成（%.1fs）", time.time() - t0)
         except Exception as e:  # noqa: BLE001
             log.error("扫描异常: %s", e, exc_info=True)
@@ -279,3 +322,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

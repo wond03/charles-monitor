@@ -1,5 +1,5 @@
 {
-  "balance": 101.84,
+  "balance": 101.21,
   "initial_balance": 100.0,
   "peak_equity": 104.72,
   "open_positions": {
@@ -30,24 +30,25 @@
     "btc": {
       "symbol": "btc",
       "name": "BTC永续",
-      "direction": "long",
-      "strategy": "BOS",
+      "direction": "short",
+      "strategy": "归汤",
       "level": "1H",
-      "entry": 81380.3,
-      "sl": 80607.19,
-      "tp": 85245.86,
-      "initial_sl": 80607.19,
+      "entry": 81465.5,
+      "sl": 81570.49,
+      "tp": 80940.56,
+      "rr": 5.0,
+      "initial_sl": 81570.49,
       "breakeven_applied": false,
       "size": 462.96,
       "margin": 4.6296,
       "leverage": 100,
-      "risk": 4.4,
+      "risk": 0.6,
       "fee_taker": 0.0008,
       "fee_open": 0.3704,
-      "open_ts": 1789782666,
-      "open_time": "2026-09-19 09:51:06",
+      "open_ts": 1789840079,
+      "open_time": "2026-09-20 01:47:59",
       "entry_type": "市价委托",
-      "detail": "实体收穿前高 81379.00；结构止损过宽(4.33%)，回退固定止损0.95%"
+      "detail": "影线上穿关键位 81489.00 后收回，疑似假突破；0.5回踩位加持(81314.50)；止损=结构位，止盈=目标位（手册条件判定）"
     }
   },
   "closed_trades": [
@@ -406,16 +407,46 @@
       "pnl": -2.14,
       "pnl_pct": -30.196,
       "reason": "反向平仓"
+    },
+    {
+      "symbol": "btc",
+      "name": "BTC永续",
+      "direction": "long",
+      "strategy": "BOS",
+      "level": "1H",
+      "entry": 81380.3,
+      "sl": 80607.19,
+      "tp": 85245.86,
+      "initial_sl": 80607.19,
+      "breakeven_applied": false,
+      "size": 462.96,
+      "margin": 4.6296,
+      "leverage": 100,
+      "risk": 4.4,
+      "fee_taker": 0.0008,
+      "fee_open": 0.3704,
+      "open_ts": 1789782666,
+      "open_time": "2026-09-19 09:51:06",
+      "entry_type": "市价委托",
+      "detail": "实体收穿前高 81379.00；结构止损过宽(4.33%)，回退固定止损0.95%",
+      "exit": 81465.5,
+      "exit_ts": 1789840078,
+      "exit_time": "2026-09-20 01:47:58",
+      "fee_close": 0.3708,
+      "fee_total": 0.7412,
+      "pnl": -0.26,
+      "pnl_pct": 10.469,
+      "reason": "反向平仓"
     }
   ],
   "stats": {
     "wins": 9,
-    "losses": 5,
-    "pnl": 2.21
+    "losses": 6,
+    "pnl": 1.58
   },
   "consecutive_losses": 1,
   "daily_trades": {
-    "2026-09-19": 1
+    "2026-09-20": 1
   },
-  "last_active_date": "2026-09-19"
+  "last_active_date": "2026-09-20"
 }

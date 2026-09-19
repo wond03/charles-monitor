@@ -121,7 +121,11 @@ def open_position(state: dict, sym: str, sig, cfg: dict):
         log.info("单日过滤: %s 当日已开 %d 单(上限 %d)，跳过开仓 %s", today, daily_cnt, max_daily, sig.symbol)
         return None
     # 连亏过滤：连续亏损达阈值暂停开仓，下个自然日自动重置
-    max_losses = int(cfg.get("max_consecutive_losses", 3) or 3)
+    # config 键 halt_after_consecutive_losses（0=关闭）；兼容旧键 max_consecutive_losses
+    max_losses_cfg = cfg.get("halt_after_consecutive_losses", cfg.get("max_consecutive_losses", 3))
+    max_losses = int(max_losses_cfg or 0)
+    if max_losses <= 0:
+        max_losses = 10 ** 9  # 0 表示关闭熔断
     if int(state.get("consecutive_losses", 0)) >= max_losses:
         log.info("连亏过滤: 已连亏 %d 单(上限 %d)，暂停交易待复盘，跳过开仓 %s",
                  state.get("consecutive_losses"), max_losses, sig.symbol)

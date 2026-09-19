@@ -462,6 +462,11 @@ def scan_symbol(klines_h1: List[Kline], klines_m15: List[Kline], klines_h4: List
                       priority=99)
         out.append(wait)
 
+    # push_structure_signals=false 时：BOS/MSS/归汤 结构信号仅作标记，
+    # 不独立推送、不进模拟开单流程（保底/模板/等待不受影响）
+    if not cfg.get("push_structure_signals", True):
+        out = [s for s in out if s.strategy not in ("BOS", "MSS", "归汤")]
+
     # 附：1H 趋势状态（不推送，供日志）
     log.debug("[%s] 引擎扫描完成：%d 个信号 %s", symbol, len(out),
               [(f"{s.strategy}/{s.level}/{s.direction}@{s.price:.2f}") for s in out])

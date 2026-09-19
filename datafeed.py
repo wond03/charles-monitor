@@ -36,6 +36,7 @@ def _gate_futures_klines(inst: str, interval: str, limit: int) -> list:
             "high": float(row["h"]),
             "low": float(row["l"]),
             "close": float(row["c"]),
+            "volume": float(row["v"] or 0),
         })
     return sorted(out, key=lambda x: x["ts"])
 
@@ -176,6 +177,7 @@ def _weex_contract_klines(inst: str, interval: str, limit: int) -> list:
             "high": float(row[2]),
             "low": float(row[3]),
             "close": float(row[4]),
+            "volume": float(row[5] or 0),
         })
     return sorted(out, key=lambda x: x["ts"])
 
@@ -205,8 +207,9 @@ _SOURCE_FUNCS = {
 
 
 def fetch_klines(inst: str, interval: str = "1h", limit: int = 120,
-                 sources: tuple = ("gate", "okx", "binance")) -> list:
-    """按优先级依次尝试多个数据源，返回统一格式K线列表。"""
+                 sources: tuple = ("gate-futures", "weex")) -> list:
+    """按优先级依次尝试多个数据源，返回统一格式K线列表。
+    默认源为纯永续链（gate-futures 主 + weex 合约域备），现货/OKX/Binance 已废除。"""
     last_err = None
     for src in sources:
         t0 = time.time()
@@ -240,8 +243,9 @@ def last_price(klines: list) -> float:
 
 if __name__ == "__main__":
     t0 = time.time()
-    btc = fetch_klines("BTC_USDT", "1h", 10)
-    gold = fetch_klines("PAXG_USDT", "1h", 10)
+    srcs = ("gate-futures", "weex")
+    btc = fetch_klines("BTC_USDT", "1h", 10, sources=srcs)
+    gold = fetch_klines("XAU_USDT", "1h", 10, sources=srcs)
     print("BTC 1H x", len(btc), "最新", last_price(btc))
-    print("PAXG 1H x", len(gold), "最新", last_price(gold))
+    print("XAU 1H x", len(gold), "最新", last_price(gold))
     print("耗时 %.2fs" % (time.time() - t0))

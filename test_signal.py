@@ -19,10 +19,11 @@ def main():
             continue
         print("=" * 60)
         print(f"[{sym['name']}] {sym['inst']}")
+        sources = tuple(s.strip() for s in str(sym.get("exchange", "gate-futures,weex")).split(",") if s.strip())
         try:
-            h1 = fetch_klines(sym["inst"], "1h", eng["h1_lookback"])
-            m15 = fetch_klines(sym["inst"], "15m", eng["m15_lookback"])
-            h4 = fetch_klines(sym["inst"], "4h", eng["h4_lookback"])
+            h1 = fetch_klines(sym["inst"], "1h", eng["h1_lookback"], sources)
+            m15 = fetch_klines(sym["inst"], "15m", eng["m15_lookback"], sources)
+            h4 = fetch_klines(sym["inst"], "4h", eng["h4_lookback"], sources)
             print(f"  1H x{len(h1)} 15M x{len(m15)} 4H x{len(h4)} 最新 {last_price(h1):.2f} "
                   f"(24h {pct_change(h1, 24):+.2f}%)")
             sigs = scan_symbol(to_klines(h1), to_klines(m15), to_klines(h4), sym["name"], eng)

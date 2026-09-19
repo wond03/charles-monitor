@@ -18,14 +18,14 @@ symbols:
     enabled: true
     name: "BTC永续"
     inst: "BTC_USDT"          # Gate.io 永续合约交易对（Weex 侧自动转为 BTCUSDT）
-    exchange: "gate-futures,weex,gate,okx,binance"  # 主源 gate-futures永续，Weex现货为第二备援（仅BTC）
+    exchange: "gate-futures,weex"  # 纯永续链：gate-futures永续主源，Weex合约域BTCUSDT永续备援
     min_move_pct: 0.15        # 触发信号的最小波动幅度(%)
 
   gold:
     enabled: true
     name: "黄金永续(XAU)"
     inst: "XAU_USDT"          # Gate 直接跟踪伦敦金 XAU 价格的永续合约（替代原 PAXG 代理）
-    exchange: "gate-futures,gate,okx,binance"  # Weex 无黄金交易对，不加入备援
+    exchange: "gate-futures,weex"  # 纯永续链：gate-futures永续主源，Weex合约域XAUUSDT永续备援
     min_move_pct: 0.10
 
 # 信号引擎参数
